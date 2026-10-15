@@ -10,7 +10,8 @@ Usage:
   agentshield hook <agent> [--capture <dir>]
                                 Called by the agent app's hooks (reads JSON on stdin). Agents: claude
                                 --capture saves each raw payload (scrubbed) for test fixtures
-  agentshield check <text>      Score a prompt or command and print the decision
+  agentshield check <text> [--json]
+                                Score text as a command and as a prompt, print the stricter decision
   agentshield --version
 `;
 
@@ -46,9 +47,21 @@ async function runHook(args: string[]): Promise<HookOutput> {
   }
 }
 
-function runCheck(text: string): HookOutput {
-  const decision = evaluate({ agent: "scripted", kind: "prompt", sessionId: "check", cwd: process.cwd(), headless: false, text });
-  return { exitCode: 0, stdout: JSON.stringify(decision, null, 2) };
+/** Score the text both as a shell command and as a prompt, and report the stricter result. */
+function runCheck(args: string[]): HookOutput {
+  const json = args.includes("--json");
+  const text = args.filter((a) => a !== "--json").join(" ");
+  const base = { agent: "scripted" as const, sessionId: "check", cwd: process.cwd(), headless: false };
+  const asCommand = evaluate({ ...base, kind: "action", tool: "Bash", input: { command: text } });
+  const asPrompt = evaluate({ ...base, kind: "prompt", text });
+  // On a tie prefer the prompt view: it carries the safer rewrite.
+  const [as, decision] = asPrompt.score > 0 && asPrompt.score >= asCommand.score ? ["prompt", asPrompt] : ["command", asCommand];
+
+  if (json) return { exitCode: 0, stdout: JSON.stringify({ as, ...decision }, null, 2) };
+  const lines = [`${decision.level} (score ${decision.score}) as a ${as}: ${decision.action.toUpperCase()}`];
+  for (const f of decision.findings) lines.push(`  ${f.ruleId} [${f.category} ${f.level}] ${f.reason}`);
+  if (decision.safeAlternative) lines.push(`${as === "prompt" ? "Safer prompt" : "Safe alternative"}: ${decision.safeAlternative}`);
+  return { exitCode: 0, stdout: lines.join("\n") };
 }
 
 async function main(argv: string[]): Promise<HookOutput> {
@@ -58,7 +71,7 @@ async function main(argv: string[]): Promise<HookOutput> {
       return runHook(rest);
     case "check":
       if (rest.length === 0) return { exitCode: 1, stderr: USAGE };
-      return runCheck(rest.join(" "));
+      return runCheck(rest);
     case "--version":
     case "-v":
       return { exitCode: 0, stdout: VERSION };

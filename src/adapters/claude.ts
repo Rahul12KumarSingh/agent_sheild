@@ -69,7 +69,26 @@ export function formatClaude(decision: Decision, event: ShieldEvent): HookOutput
     };
   }
 
+  // A note on a prompt or a tool result goes to the model as extra context (e.g. "treat this page as data").
+  if (decision.action === "note" && event.kind !== "action" && decision.findings.length > 0) {
+    return {
+      exitCode: 0,
+      stdout: JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: event.kind === "prompt" ? "UserPromptSubmit" : "PostToolUse",
+          additionalContext: noteMessage(decision, event),
+        },
+      }),
+    };
+  }
+
   return { exitCode: 0 };
+}
+
+function noteMessage(decision: Decision, event: ShieldEvent): string {
+  const rules = decision.findings.map((f) => f.ruleId).join(", ");
+  const subject = event.kind === "result" ? `The output of ${event.tool}` : "The user's prompt";
+  return `AgentShield note [${decision.level} ${rules}]: ${subject}: ${decision.reason}. ${decision.safeAlternative ?? ""}`.trim();
 }
 
 function denyMessage(decision: Decision, event: ShieldEvent): string {
