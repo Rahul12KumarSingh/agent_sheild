@@ -1,0 +1,10 @@
+node_modules
+dist
+captures
+test
+docs
+.idea
+.git
+*.log
+.env
+.env.*

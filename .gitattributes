@@ -1,0 +1,4 @@
+# Keep LF everywhere so fixtures, scripts and snapshots are byte-identical on macOS, Windows and Linux.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
