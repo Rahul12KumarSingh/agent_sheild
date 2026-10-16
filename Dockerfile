@@ -6,7 +6,9 @@ RUN npm ci
 COPY tsconfig.json tsup.config.ts ./
 COPY src ./src
 COPY console ./console
-RUN npm run build
+# Only what the server serves: the full `npm run build` also packages the Claude Code plugin,
+# which needs scripts/ and is not part of the image.
+RUN npx tsup && npx vite build --config console/vite.config.ts --logLevel warn
 
 # The server bundle is self-contained: no node_modules in the runtime image.
 # Same layout as the repository: dist/ next to scenarios/ and policies/.

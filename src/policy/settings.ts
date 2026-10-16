@@ -1,6 +1,9 @@
 // Every adjustable setting, with a strictness order so the merge can tell tightening from loosening.
 // Validation is hand-written (no schema library): the hook starts on every agent action, so start-up time matters.
 
+import { GUARDRAIL_IDS } from "./guardrails.js";
+import { type CustomRule, parseCustomRules, RuleError } from "./rules.js";
+
 export const PII_PACKS = ["card", "aadhaar", "pan", "email"] as const;
 export type PiiPack = (typeof PII_PACKS)[number];
 
@@ -29,6 +32,10 @@ export interface Settings {
   extra_ask_commands: string[];
   /** Personal data packs that are detected. */
   pii: PiiPack[];
+  /** Gemini second opinion on risky-looking actions and web content: off, on (can ask a human), strict (can also block). */
+  ai_judge: "off" | "on" | "strict";
+  /** Ready-made guardrail packs that are switched off (all are on by default). */
+  guardrails_off: string[];
 }
 
 export type SettingKey = keyof Settings;
@@ -54,6 +61,8 @@ export const SPEC: Record<SettingKey, Spec> = {
   protected_paths: { type: "list", add: "tighten" },
   extra_ask_commands: { type: "list", add: "tighten" },
   pii: { type: "list", add: "tighten", values: PII_PACKS },
+  ai_judge: { type: "enum", order: ["off", "on", "strict"] },
+  guardrails_off: { type: "list", add: "loosen", values: GUARDRAIL_IDS },
 };
 
 export const SETTING_KEYS = Object.keys(SPEC) as SettingKey[];
@@ -72,6 +81,8 @@ export const DESCRIPTIONS: Record<SettingKey, string> = {
   protected_paths: "Extra secret files and folders (globs)",
   extra_ask_commands: "Commands that always need approval",
   pii: "Personal data packs that are detected",
+  ai_judge: "AI review of risky-looking commands and web content: off, on (asks you), strict (can block)",
+  guardrails_off: "Ready-made guardrail packs that are switched off",
 };
 
 export interface ProfileDef extends Partial<Settings> {
@@ -88,6 +99,10 @@ export interface PolicyFile extends Partial<Settings> {
   mode?: "enforce" | "monitor";
   profile?: string;
   console_url?: string;
+  /** Where the AI judge and the rule writer send requests when no GEMINI_API_KEY is set. Company or personal only. */
+  ai_endpoint?: string;
+  /** The team's or developer's own block / ask rules. Only ever added to, never removed by a lower layer. */
+  custom_rules?: CustomRule[];
   locked?: SettingKey[];
   profiles?: Record<string, ProfileDef>;
 }
@@ -128,6 +143,7 @@ export function parseSetting(key: SettingKey, value: unknown, path: string = key
       return value.map((e, i) => {
         if (typeof e !== "string" || e.trim() === "" || e.length > 200) throw new SchemaError(`${path}.${i}`, "expected a short text");
         if (key === "pii" && !PII_ENTRY.test(e)) throw new SchemaError(`${path}.${i}`, "expected card, aadhaar, pan or email");
+        if (key === "guardrails_off" && !GUARDRAIL_IDS.includes(e.replace(/^!/, ""))) throw new SchemaError(`${path}.${i}`, `expected one of ${GUARDRAIL_IDS.join(", ")}`);
         return e;
       });
     }
@@ -194,8 +210,17 @@ export function parsePolicyFile(raw: unknown): PolicyFile {
         out.profile = v;
         break;
       case "console_url":
+      case "ai_endpoint":
         if (typeof v !== "string" || !/^https?:\/\/[^\s]+$/.test(v)) throw new SchemaError(key, "expected an http or https URL");
-        out.console_url = v.replace(/\/+$/, "");
+        out[key] = v.replace(/\/+$/, "");
+        break;
+      case "custom_rules":
+        try {
+          out.custom_rules = parseCustomRules(v, key);
+        } catch (err) {
+          if (err instanceof RuleError) throw new SchemaError(err.path, err.message.slice(err.path.length + 2));
+          throw err;
+        }
         break;
       case "locked":
         out.locked = parseLocked(v, key);

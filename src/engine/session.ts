@@ -34,6 +34,10 @@ export interface SessionState {
   blocks: number;
   /** Scripts this session wrote with risky commands in them (staged payloads), by resolved path. */
   scripts?: Record<string, FlaggedScript>;
+  /** The last action AgentShield paused for the user's approval (the hook layer manages these). */
+  pending?: { fp: string; summary: string; reason: string; at: string };
+  /** Actions the user allowed once by replying "allow". */
+  approved?: { fp: string; summary: string; at: string }[];
   createdAt: string;
   updatedAt: string;
 }

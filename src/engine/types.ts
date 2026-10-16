@@ -58,6 +58,8 @@ export interface Finding {
   reason: string;
   /** Redacted snippet of what matched, safe to log. */
   excerpt?: string;
+  /** A rule-specific safe alternative (custom rules); otherwise the catalog's. */
+  alternative?: string;
 }
 
 export interface Decision {
@@ -72,6 +74,8 @@ export interface Decision {
   safeAlternative?: string;
   /** Monitor mode: what enforce mode would have done. The action itself is then "allow". */
   monitored?: Action;
+  /** AgentShield's own approval flow (Claude Code): paused for the user, allowed once, or the user's "allow". */
+  approval?: { state: "needed" | "granted" | "acknowledged"; summary: string };
   /** The Rule of Two legs after this event (A stranger's text, B sensitive data, C this action reaches outside). */
   session?: { A?: string; B?: string; C?: string; blocks: number; ruleOfTwo: boolean };
 }

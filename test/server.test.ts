@@ -29,9 +29,11 @@ const post = (app: ReturnType<typeof make>["app"], path: string, body: unknown, 
 
 describe("server basics", () => {
   it("health check says ok", async () => {
-    const res = await make().app.request("/healthz");
-    expect(res.status).toBe(200);
-    expect(await res.text()).toBe("ok");
+    for (const path of ["/health", "/healthz"]) {
+      const res = await make().app.request(path);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("ok");
+    }
   });
 
   it("sets security headers and serves a placeholder when the console is not built", async () => {

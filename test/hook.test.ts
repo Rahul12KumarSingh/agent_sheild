@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
-import { installClaude, isOurs, ourHandler } from "../src/cli/init.js";
+import { cliPath, initCommand, installClaude, installRuntime, isOurs, ourHandler } from "../src/cli/init.js";
 import type { EngineContext } from "../src/engine/index.js";
 import { runHook } from "../src/hook/run.js";
 import { POSIX, POSIX_CWD } from "./helpers.js";
@@ -71,6 +71,45 @@ describe("P4: agentshield init", () => {
     expect(ourHandler(cli)).toMatchObject({ command: "node", args: [cli, "hook", "claude"], onFailure: "block" });
     expect(isOurs(ourHandler(cli))).toBe(true);
     expect(isOurs({ type: "command", command: "lint.sh" })).toBe(false);
+  });
+
+  it("copies itself to a stable runtime path once, and the hooks run that copy", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentshield-runtime-"));
+    try {
+      const source = join(dir, "npx-cache", "cli.js");
+      mkdirSync(dirname(source), { recursive: true });
+      writeFileSync(source, "// bundle v1\n");
+      const target = join(dir, "bin", "agentshield.mjs");
+      expect(installRuntime(source, target)).toBe(cliPath(target));
+      expect(readFileSync(target, "utf8")).toBe("// bundle v1\n");
+      writeFileSync(source, "// bundle v2\n");
+      installRuntime(source, target);
+      expect(readFileSync(target, "utf8")).toBe("// bundle v2\n");
+
+      const project = join(dir, "project");
+      mkdirSync(project);
+      const out = initCommand([], { cwd: project, cli: source, runtime: target });
+      expect(out.exitCode).toBe(0);
+      const settings = JSON.parse(readFileSync(join(project, ".claude", "settings.json"), "utf8"));
+      expect(settings.hooks.PreToolUse[0].hooks[0].args[0]).toBe(cliPath(target));
+      rmSync(dirname(source), { recursive: true });
+      expect(existsSync(target), "hooks survive the source being deleted (npx cache cleanup)").toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("--in-place points the hooks at the running file", () => {
+    const dir = mkdtempSync(join(tmpdir(), "agentshield-inplace-"));
+    try {
+      const out = initCommand(["--in-place"], { cwd: dir, cli: "/repo/dist/cli.js", runtime: join(dir, "never") });
+      expect(out.exitCode).toBe(0);
+      const settings = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf8"));
+      expect(settings.hooks.PreToolUse[0].hooks[0].args[0]).toBe("/repo/dist/cli.js");
+      expect(existsSync(join(dir, "never"))).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("updates a stale path and removes cleanly", () => {

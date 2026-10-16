@@ -108,7 +108,7 @@ export function httpTransport(provider: Provider, model: string, env: NodeJS.Pro
   };
 }
 
-export function createGemini(opts: { env?: NodeJS.ProcessEnv; transport?: Transport; provider?: Provider; model?: string } = {}): Gemini {
+export function createGemini(opts: { env?: NodeJS.ProcessEnv; transport?: Transport; provider?: Provider; model?: string; timeoutMs?: number } = {}): Gemini {
   const env = opts.env ?? process.env;
   const provider = opts.provider ?? (opts.transport ? "ai-studio" : detectProvider(env));
   const model = opts.model ?? env.GEMINI_MODEL ?? DEFAULT_MODEL;
@@ -118,7 +118,7 @@ export function createGemini(opts: { env?: NodeJS.ProcessEnv; transport?: Transp
     async json<T>(req: GeminiRequest) {
       if (!transport) throw new Error("Gemini is not configured");
       const t0 = Date.now();
-      const text = await transport(req, AbortSignal.timeout(TIMEOUT_MS));
+      const text = await transport(req, AbortSignal.timeout(opts.timeoutMs ?? TIMEOUT_MS));
       const value = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, "")) as T;
       return { value, ms: Date.now() - t0 };
     },

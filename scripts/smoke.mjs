@@ -27,7 +27,8 @@ const assert = (cond, msg) => {
 console.log(`Smoke test: ${base}`);
 
 await check("health check says ok", async () => {
-  const res = await fetch(`${base}/healthz`, { signal: AbortSignal.timeout(10000) });
+  // Not /healthz: Cloud Run reserves paths ending in "z".
+  const res = await fetch(`${base}/health`, { signal: AbortSignal.timeout(10000) });
   const body = (await res.text()).trim();
   assert(res.ok && body === "ok", `got ${res.status} '${body}'`);
 });

@@ -5,7 +5,8 @@ import { join } from "node:path";
 import type { HookOutput } from "../adapters/claude.js";
 import { evaluate } from "../engine/index.js";
 import { loadPolicyAsync, userDir } from "../policy/index.js";
-import { CLAUDE_EVENTS, cliPath, isOurs, readSettings, settingsPath } from "./init.js";
+import { DEFAULT_AI_ENDPOINT } from "../hook/ai.js";
+import { CLAUDE_EVENTS, cliPath, isOurs, readSettings, runtimePath, settingsPath } from "./init.js";
 
 type Status = "ok" | "warn" | "fail";
 interface Check {
@@ -54,9 +55,14 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
       for (const e of present) {
         for (const g of hooks[e] ?? []) {
           for (const h of (g.hooks ?? []).filter(isOurs)) {
-            const target = h.args?.find((a) => /cli\.js$/i.test(a)) ?? /(\S+cli\.js)/.exec(h.command ?? "")?.[1]?.replace(/^"|"$/g, "");
-            if (target && !existsSync(target)) add("fail", `${e} hook points at ${target}, which does not exist`);
-            else if (target && target !== cli) add("warn", `${e} hook points at ${target}, not this copy (${cli})`);
+            const target = h.args?.find((a) => /(cli\.js|agentshield\.mjs)$/i.test(a)) ?? /(\S+(?:cli\.js|agentshield\.mjs))/.exec(h.command ?? "")?.[1]?.replace(/^"|"$/g, "");
+            if (target && !existsSync(target)) add("fail", `${e} hook points at ${target}, which does not exist (run agentshield init)`);
+            else if (target && target === cliPath(runtimePath())) {
+              // The usual install: init's own copy. Warn only when it is older than the AgentShield running doctor.
+              if (target !== cli && existsSync(opts.cli) && !readFileSync(target).equals(readFileSync(opts.cli))) {
+                add("warn", `${e} hook runs an older copy of AgentShield (${target}). Run \`agentshield init\` to update it`);
+              }
+            } else if (target && target !== cli) add("warn", `${e} hook points at ${target}, not this copy (${cli})`);
             if (h.onFailure !== "block") add("warn", `${e} hook does not set onFailure "block": a crash or timeout would let the action through`);
           }
         }
@@ -87,6 +93,16 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
     add("ok", `Policy loads: ${p.name}, mode ${p.mode.toUpperCase()}, profile ${p.profile}`);
     if (p.mode === "monitor") add("warn", "Monitor mode: nothing is blocked, events are only logged");
     for (const w of p.warnings) add("warn", `Policy: ${w}`);
+    if (p.customRules.length) add("ok", `Custom rules: ${p.customRules.length} (${[...new Set(p.customRules.map((r) => r.source))].join(", ")})`);
+    if (p.settings.ai_judge === "off" || opts.env.AGENTSHIELD_AI === "off") add("ok", "AI review: off (rules only, nothing leaves this computer)");
+    else {
+      const via = opts.env.GEMINI_API_KEY ? "your own AI key (GEMINI_API_KEY)" : `the AgentShield cloud (${p.aiEndpoint ?? DEFAULT_AI_ENDPOINT})`;
+      let paused = false;
+      try {
+        paused = (JSON.parse(readFileSync(join(userDir(opts.env), "ai-cache.json"), "utf8")) as { pausedUntil?: number }).pausedUntil! > Date.now();
+      } catch {}
+      add(paused ? "warn" : "ok", `AI review: ${p.settings.ai_judge}, via ${via}${paused ? ". Paused for a few minutes after repeated failures (offline or blocked network); rules still decide" : ""}`);
+    }
   } catch (err) {
     add("fail", `Policy could not be loaded, so every action will be denied: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -118,7 +134,7 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
     const p = await loadPolicyAsync({ cwd: opts.cwd, env: opts.env });
     if (p.consoleUrl) {
       try {
-        const r = await fetch(new URL("/healthz", p.consoleUrl), { signal: AbortSignal.timeout(1500) });
+        const r = await fetch(new URL("/health", p.consoleUrl), { signal: AbortSignal.timeout(1500) });
         add(r.ok ? "ok" : "warn", `Console ${p.consoleUrl} ${r.ok ? "is reachable" : `answered ${r.status}`}`);
       } catch {
         add("warn", `Console ${p.consoleUrl} is not reachable (decisions are unaffected; events stay in the local log)`);
