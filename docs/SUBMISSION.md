@@ -49,7 +49,7 @@ The console runs on **Google Cloud Run**: a live feed, a replay of the full atta
 | Benign cases blocked or asked | 0 of 100 | EVALUATION.md (hard gate) |
 | Scenarios matching their expected result | 10 of 10 | EVALUATION.md, `test/server.test.ts` |
 | Engine decision time | about 0.1 ms (p95) | EVALUATION.md |
-| Hook end to end, as the agent app sees it | p95 192 ms (p50 163 ms) on a Windows laptop, about 118 ms of it Node start-up | EVALUATION.md |
+| Hook end to end, as the agent app sees it | p95 221 ms (p50 194 ms) on a Windows laptop, about 140 ms of it Node start-up | EVALUATION.md |
 | Rules | 53, every one with a positive and a negative test | `test/engine-rules.test.ts` |
 | Tests | 1223 | `npm test` |
 

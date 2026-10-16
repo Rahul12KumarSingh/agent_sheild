@@ -374,7 +374,7 @@ Evaluation table: done, see [EVALUATION.md](EVALUATION.md) (`npm run eval`). Sub
 - [x] A broken policy file does not stop everyday work and never loosens anything (`test/policy.test.ts`)
 - [x] The hook is started the way VS Code starts it (through PowerShell on Windows, a shell elsewhere) and VS Code's own rules are applied to the answer: everyday work goes ahead, a key in a command, an edit of the hook file and a `curl` of `.env` are denied, `cat .env` and a search of `.env*` ask, a key in a prompt stops the turn, non-ASCII text survives (`test/vscode-launch.test.ts`)
 - [x] A search scope that names secret files asks, an ordinary scope never does, and a task or `send_to_terminal` command meets the shell rules (`test/universal.test.ts`)
-- [x] Attack corpus 85 of 85, mutations 367 of 367, benign 0 of 100 blocked or asked, scenarios 10 of 10, hook p50 163 ms ([EVALUATION.md](EVALUATION.md))
+- [x] Attack corpus 85 of 85, mutations 367 of 367, benign 0 of 100 blocked or asked, scenarios 10 of 10, hook p50 194 ms ([EVALUATION.md](EVALUATION.md))
 - [ ] A real session of Copilot CLI, Cursor, Windsurf and Gemini CLI with this build (they follow the vendors' documented formats so far)
 - [ ] A live agent chat in VS Code with the hooks installed: record one blocked command and one ask
 - [ ] On the machine where "hook errored" appeared: pull, rebuild, run `agentshield init --agent all` and `agentshield doctor` in the repository, then retry the `.claude/settings.json` delete test in Claude Code and Copilot CLI
