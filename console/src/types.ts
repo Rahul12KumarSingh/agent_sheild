@@ -61,6 +61,8 @@ export interface Info {
   gemini: GeminiStatus;
   counters: Counters;
   demo: boolean;
+  /** Running on this computer via `agentshield setup`: the settings page can save. */
+  local?: boolean;
 }
 
 export interface ScenarioSummary {
@@ -118,3 +120,79 @@ export interface PolicyView {
   profiles: Record<string, { rank: number; description?: string }>;
   rules: { id: string; category: string; level: Exclude<Level, "CLEAN">; title: string; alternative: string }[];
 }
+
+// ---------- Settings: custom rules, AI judge, local policy files ----------
+
+export type RuleKind = "command" | "path" | "host" | "text";
+
+export interface CustomRule {
+  id: string;
+  description: string;
+  kind: RuleKind;
+  patterns: string[];
+  action: "block" | "ask";
+  on?: ("read" | "write")[];
+  alternative?: string;
+  /** Which layer added it (effective rules only). */
+  source?: string;
+}
+
+export interface DraftResult {
+  rules: CustomRule[];
+  examples: { stop: string[]; allow: string[] };
+  refused?: string;
+  rejected: { rule: unknown; problem: string }[];
+  check: { examples: { text: string; expect: "stop" | "allow"; got: Action; rules: string[]; ok: boolean }[]; overbroad: { text: string; rules: string[] }[] };
+  via: string;
+  model?: string;
+  ms?: number;
+}
+
+export type SettingsLayer = "project" | "user";
+
+export interface Settings {
+  warning_action: "ask" | "block";
+  rule_of_two: "ask" | "block";
+  mild_notes: "on" | "off";
+  coach_messages: "always" | "on_block" | "off";
+  outside_reads: "allow" | "ask";
+  allow_test_data: boolean;
+  circuit_breaker: number;
+  allowed_hosts: string[];
+  allowed_remotes: string[];
+  trusted_mcp_servers: string[];
+  protected_paths: string[];
+  extra_ask_commands: string[];
+  pii: string[];
+  ai_judge: "off" | "on" | "strict";
+  guardrails_off: string[];
+}
+
+export type PolicyFileView = Partial<Settings> & { custom_rules?: CustomRule[]; [k: string]: unknown };
+
+export interface LocalState {
+  cwd: string;
+  projectRoot: string | null;
+  paths: { company: string | null; project: string | null; user: string };
+  userFileDisplay: string;
+  exists: { project: boolean; user: boolean };
+  mtimes: { project: number | null; user: number | null };
+  files: { project: PolicyFileView | null; user: PolicyFileView | null };
+  errors: { company?: string; project?: string; user?: string };
+  policy: {
+    name: string;
+    mode: string;
+    profile: string;
+    settings: Settings;
+    sources: Record<string, string>;
+    locked: Record<string, string>;
+    warnings: string[];
+    customRules: CustomRule[];
+  } | null;
+  hooks: { project: boolean; user: boolean; copilot: boolean };
+  guardrails: { id: string; name: string; summary: string; examples: string[]; on: boolean; lockedBy: string | null }[];
+  ai: { localKey: boolean; endpoint: string; via: string };
+  stateDir: string;
+}
+
+export type TestResult = { as: "prompt" | "command"; decision: CoachResult["decision"] };

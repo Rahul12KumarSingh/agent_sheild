@@ -9,15 +9,19 @@ import { configCommand } from "./config.js";
 import { doctorCommand } from "./doctor.js";
 import { initCommand } from "./init.js";
 import { runMcp } from "./mcp.js";
+import { demoCommand } from "./demo.js";
+import { setupCommand } from "./setup.js";
 
-const VERSION = "1.0.0";
+const VERSION = "0.11.1";
 const CLI = fileURLToPath(import.meta.url);
 
 const USAGE = `agentshield ${VERSION}: a policy checkpoint for AI coding agents
 
 Usage:
-  agentshield init [--agent claude|copilot|cursor|windsurf|gemini|antigravity|all] [--user] [--remove]
-                                         Add the hooks to an agent app's settings (project, or --user for every project)
+  agentshield init [--agent claude|copilot|cursor|windsurf|gemini|antigravity|all] [--user] [--remove] [--in-place]
+                                         Add the hooks to an agent app's settings (project, or --user for every project).
+                                         Hooks run a copy in ~/.agentshield/bin, so npx or a moved install keeps working;
+                                         --in-place runs this file instead (for working on AgentShield itself)
   agentshield doctor                     Check the setup: runs every hook command the way the agent app does
   agentshield check [--json] [--profile <name>] <text>
                                          Score a prompt or command, print level, rules, reason and safe alternative
@@ -25,6 +29,9 @@ Usage:
   agentshield approvals [revoke <n|all>] List or remove saved approvals
   agentshield config show|explain|set|path
                                          Read or change settings. Company rules cannot be loosened
+  agentshield setup [--port N] [--no-open]
+                                         Settings page in your browser: rules in plain English, AI judge, test bench
+  agentshield demo [folder]              A realistic demo project (fake secrets) and the prompts to try
   agentshield serve [--port 8080]        Run the console locally
   agentshield mcp                        MCP server (stdio) with check_prompt and check_command, advice only
   agentshield hook <agent> [--capture <dir>]
@@ -74,7 +81,7 @@ async function main(argv: string[]): Promise<HookOutput> {
   switch (command) {
     case "hook": {
       const agent = rest[0] ?? "";
-      const run = await runHook({ agent, raw: await readStdin(), captureDir: flag(rest, "--capture") ?? process.env.AGENTSHIELD_CAPTURE_DIR, event: flag(rest, "--event") });
+      const run = await runHook({ agent, raw: await readStdin(), captureDir: flag(rest, "--capture") ?? process.env.AGENTSHIELD_CAPTURE_DIR, event: flag(rest, "--event"), ai: "auto" });
       return run.output;
     }
     case "check":
@@ -91,6 +98,12 @@ async function main(argv: string[]): Promise<HookOutput> {
       return doctorCommand({ cwd: process.cwd(), env: process.env, cli: CLI });
     case "serve":
       return serve(rest);
+    case "demo":
+      return demoCommand(rest, { cwd: process.cwd(), cli: CLI });
+    case "setup":
+    case "settings":
+    case "ui":
+      return setupCommand(rest, CLI);
     case "mcp":
       await runMcp({ cwd: process.cwd(), env: process.env, version: VERSION });
       return { exitCode: 0 };

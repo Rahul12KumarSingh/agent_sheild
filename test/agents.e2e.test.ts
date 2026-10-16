@@ -44,7 +44,7 @@ describe.skipIf(!existsSync(cli))("init writes hook files every agent app can ru
     // No exec form anywhere: a consumer that only reads `command` must get a complete command line.
     for (const h of [claude, copilot, cursor, windsurf, gemini, antigravity, antigravityPost]) {
       expect(h.args, JSON.stringify(h)).toBeUndefined();
-      expect(h.command).toMatch(/^node ".*cli\.js" hook (claude|copilot|cursor|windsurf|gemini|antigravity)( --event PostToolUse)?$/);
+      expect(h.command).toMatch(/^node ".*(cli\.js|agentshield\.mjs)" hook (claude|copilot|cursor|windsurf|gemini|antigravity)( --event PostToolUse)?$/);
     }
     expect(antigravityPost.command).toContain("--event PostToolUse");
     expect(cursor.failClosed).toBe(true);

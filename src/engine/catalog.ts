@@ -91,6 +91,10 @@ export const RULES = {
 
   // POLICY: rules added by the company, project or role
   "POL-001": { category: "PRIV", level: "WARNING", confidence: 1, title: "Command needs approval by policy", alternative: "Ask the user to approve or run this command themselves." },
+  "GRD-001": { category: "PRIV", level: "SEVERE", confidence: 1, title: "Blocked by a guardrail", alternative: "This is blocked by an AgentShield guardrail. Tell the user what you wanted to do and why, and let them decide." },
+  "GRD-002": { category: "PRIV", level: "WARNING", confidence: 1, title: "Needs approval by a guardrail", alternative: "An AgentShield guardrail asks for approval first. Explain to the user why it is needed." },
+  "CUS-001": { category: "PRIV", level: "SEVERE", confidence: 1, title: "Blocked by a custom rule", alternative: "This is blocked by your team's AgentShield rules. Tell the user what you wanted to do and why, and let them decide." },
+  "CUS-002": { category: "PRIV", level: "WARNING", confidence: 1, title: "Needs approval by a custom rule", alternative: "Your team asks for approval before this. Explain to the user why it is needed." },
   "POL-002": { category: "SECRET", level: "WARNING", confidence: 1, title: "Reads outside the project folder (not allowed for this role without approval)", alternative: "Work inside the project folder, or ask the user for the file you need." },
 } as const satisfies Record<string, RuleMeta>;
 

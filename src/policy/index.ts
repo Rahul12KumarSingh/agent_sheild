@@ -1,6 +1,8 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { guardrailRules } from "./guardrails.js";
+import type { CustomRule } from "./rules.js";
 import {
   parsePolicyFile,
   type PolicyFile,
@@ -12,6 +14,8 @@ import {
   SPEC,
 } from "./settings.js";
 
+export * from "./guardrails.js";
+export * from "./rules.js";
 export * from "./settings.js";
 
 // Four layers, strictest wins: company -> role profile -> project -> personal.
@@ -38,6 +42,9 @@ export const BUILTIN: PolicyFile = {
   protected_paths: [],
   extra_ask_commands: [],
   pii: ["card", "aadhaar", "pan", "email"],
+  ai_judge: "on",
+  guardrails_off: [],
+  custom_rules: [],
   locked: ["rule_of_two"],
   profiles: {
     developer: { rank: 1, description: "Balanced default: WARNING asks, MILD notes" },
@@ -79,6 +86,10 @@ export interface EffectivePolicy {
   layers: { label: string; path?: string }[];
   profiles: Record<string, { rank: number; description?: string }>;
   consoleUrl?: string;
+  /** Custom rules from every layer, each with the layer that added it. No layer can remove a higher layer's rule. */
+  customRules: (CustomRule & { source: string; pack?: string })[];
+  /** Where AI requests go when there is no GEMINI_API_KEY. Set by the company or the developer, never by a repository. */
+  aiEndpoint?: string;
 }
 
 export class PolicyError extends Error {}
@@ -292,6 +303,14 @@ export function mergePolicy(layers: ParsedLayers, assignedOverride?: string, pat
   }
   if (mode !== "monitor") mode = "enforce";
 
+  const customRules: EffectivePolicy["customRules"] = guardrailRules(state.settings.guardrails_off);
+  for (const [label, layer] of [["company", company], ["project", layers.project], ["personal config", layers.user]] as const) {
+    for (const r of layer?.custom_rules ?? []) customRules.push({ ...r, source: label });
+  }
+  // A repository must not be able to send your commands to its own server.
+  if (layers.project?.ai_endpoint) state.warnings.push("project: ignored ai_endpoint (only the company or your personal config can set it)");
+  if (layers.project?.console_url) state.warnings.push("project: ignored console_url (only your personal config can set it)");
+
   return {
     name: company?.name ?? base.name ?? "AgentShield",
     mode,
@@ -305,6 +324,8 @@ export function mergePolicy(layers: ParsedLayers, assignedOverride?: string, pat
     layers: layerList,
     profiles: Object.fromEntries(Object.entries(profiles).map(([k, v]) => [k, { rank: v.rank, description: v.description }])),
     consoleUrl: layers.user?.console_url,
+    customRules,
+    aiEndpoint: company?.ai_endpoint ?? layers.user?.ai_endpoint,
   };
 }
 

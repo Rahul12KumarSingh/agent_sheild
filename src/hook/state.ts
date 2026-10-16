@@ -43,16 +43,16 @@ export function saveSession(stateDir: string, state: SessionState): void {
           legs: { A: state.legs.A ?? disk.legs.A, B: state.legs.B ?? disk.legs.B },
           blocks: Math.max(state.blocks, disk.blocks),
           ...(disk.scripts || state.scripts ? { scripts: { ...disk.scripts, ...state.scripts } } : {}),
-          ...(disk.approved || state.approved ? { approved: { ...disk.approved, ...state.approved } } : {}),
-          ...(disk.pending || state.pending ? { pending: { ...disk.pending, ...state.pending } } : {}),
+          ...(disk.yes || state.yes ? { yes: { ...disk.yes, ...state.yes } } : {}),
+          ...(disk.asked || state.asked ? { asked: { ...disk.asked, ...state.asked } } : {}),
           ...(disk.last || state.last ? { last: (state.last?.at ?? 0) >= (disk.last?.at ?? 0) ? state.last : disk.last } : {}),
         }
       : state;
   // An ask that has been approved no longer waits.
-  if (merged.pending && merged.approved) {
-    for (const [sig, ask] of Object.entries(merged.pending)) if (ask.items.every((i) => merged.approved![i.id])) delete merged.pending[sig];
+  if (merged.asked && merged.yes) {
+    for (const [sig, ask] of Object.entries(merged.asked)) if (ask.items.every((i) => merged.yes![i.id])) delete merged.asked[sig];
   }
-  if (merged.pending && Object.keys(merged.pending).length === 0) delete merged.pending;
+  if (merged.asked && Object.keys(merged.asked).length === 0) delete merged.asked;
   if (!merged.legs.A) delete merged.legs.A;
   if (!merged.legs.B) delete merged.legs.B;
   const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;

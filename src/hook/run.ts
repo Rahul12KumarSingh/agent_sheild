@@ -5,6 +5,8 @@ import { capturePayload } from "../cli/capture.js";
 import { decide, defaultContext, eventSig, type EngineContext } from "../engine/index.js";
 import type { Decision, ShieldEvent } from "../engine/types.js";
 import { type EffectivePolicy, fallbackPolicy, loadPolicyAsync, userDir } from "../policy/index.js";
+import { type AiJudge, aiAllowed, aiInput, applyAi, createAiJudge } from "./ai.js";
+import { applyApproval } from "./approval.js";
 import { approvalLookup } from "./approvals-store.js";
 import { gitDiffSupplier } from "./git.js";
 import { gitRemoteUrl, loadSession, saveSession } from "./state.js";
@@ -29,6 +31,8 @@ export interface HookRunOptions {
   label?: Partial<ShieldRecord>;
   /** A preloaded policy (the server's demo policy). Otherwise the files are read. */
   policy?: EffectivePolicy;
+  /** The live AI judge. "auto" builds one from the policy (the CLI); omitted means rules only (tests, scenarios). */
+  ai?: AiJudge | "auto";
 }
 
 export interface HookRun {
@@ -99,19 +103,28 @@ export async function runHook(opts: HookRunOptions): Promise<HookRun> {
       approved: approvalLookup(stateDir, event.cwd),
       duplicate,
     });
-    saveSession(stateDir, outcome.session!);
-    const output = adapter.format(outcome.decision, event, { coach: policy.settings.coach_messages, approvals: policy.settings.approvals });
+    let decision = outcome.decision;
+    let nextSession = outcome.session!;
+    const aiRequest = opts.ai && aiAllowed(env, event, policy) ? aiInput(event, decision, policy) : undefined;
+    if (aiRequest) {
+      const judge = opts.ai === "auto" ? createAiJudge({ env, stateDir, endpoint: policy.aiEndpoint }) : opts.ai!;
+      decision = applyAi(decision, await judge.judge(aiRequest).catch(() => undefined), event, policy);
+    }
+    // Claude Code's Yes/No box cannot say who asks or why, so AgentShield runs its own "reply allow" approval there (the message decides, not the hook file).
+    if (adapter.id === "claude" && policy.mode !== "monitor") ({ decision, session: nextSession } = applyApproval(event, decision, nextSession));
+    saveSession(stateDir, nextSession);
+    const output = adapter.format(decision, event, { coach: policy.settings.coach_messages, approvals: policy.settings.approvals });
     if (degraded && output.exitCode === 2 && output.stderr) {
       output.stderr += `\nAgentShield is using its built-in rules because a policy file could not be loaded (${degraded}). Run \`agentshield doctor\`.`;
     }
-    const record = toRecord(event, outcome.decision, {
+    const record = toRecord(event, decision, {
       profile: policy.profile,
       delivered: { exitCode: output.exitCode, ...(output.stderr || output.stdout ? { message: (output.stderr ?? output.stdout)!.slice(0, 600) } : {}) },
       ...(degraded ? { degraded: true } : {}),
       ...opts.label,
     });
     if (opts.telemetry !== false && !duplicate) await report(record, policy, env, stateDir);
-    return { output, event, decision: outcome.decision, policy, record };
+    return { output, event, decision, policy, record };
   } catch (err) {
     return { event, policy, output: failure(stateDir, "internal error", err) };
   }

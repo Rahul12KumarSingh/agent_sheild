@@ -47,6 +47,25 @@ export function geminiHandler(cli: string): Handler {
   return { type: "command", command: hookCommand(cli, "gemini"), name: "agentshield", timeout: 30000 };
 }
 
+/**
+ * Where `init` keeps its own copy of the hook program. The CLI is one self-contained file, so hooks that
+ * point here keep working after an npx cache cleanup, a global uninstall or a moved clone.
+ * AGENTSHIELD_HOME moves it together with the rest of AgentShield's state (tests, a second profile).
+ */
+export const runtimePath = (home = homedir()) => join(process.env.AGENTSHIELD_HOME || join(home, ".agentshield"), "bin", "agentshield.mjs");
+
+/** Copy this bundle to the runtime path when it changed, and return the path the hooks should run. */
+export function installRuntime(cli: string, target = runtimePath()): string {
+  if (cli !== target) {
+    const next = readFileSync(cli);
+    if (!existsSync(target) || !readFileSync(target).equals(next)) {
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, next);
+    }
+  }
+  return cliPath(target);
+}
+
 /** Returns the new settings and a list of changes. Never removes other hooks. */
 function installGroups(settings: Settings, plan: { event: string; matcher?: string }[], handler: Handler, remove: boolean): { settings: Settings; changes: string[] } {
   const next: Settings = structuredClone(settings);
@@ -193,6 +212,8 @@ export interface InitOptions {
   cwd: string;
   cli: string;
   home?: string;
+  /** Where the hook program is copied to (tests). */
+  runtime?: string;
 }
 
 interface Target {
@@ -281,7 +302,14 @@ export function initCommand(args: string[], opts: InitOptions): HookOutput {
   const names = wanted === "all" ? [...AGENT_NAMES] : AGENT_NAMES.filter((n) => n === wanted);
   if (names.length === 0) return { exitCode: 1, stderr: `init supports --agent ${AGENT_NAMES.join("|")}|all (default claude).` };
 
-  const cli = cliPath(opts.cli);
+  // Hooks run a copy kept in ~/.agentshield/bin, so a moved clone or a cleaned npx cache cannot break them.
+  // --in-place points them at this very file (for working on AgentShield itself); removing never needs a copy.
+  let cli: string;
+  try {
+    cli = remove || args.includes("--in-place") ? cliPath(opts.cli) : installRuntime(opts.cli, opts.runtime);
+  } catch (err) {
+    return { exitCode: 1, stderr: `Could not copy the hook program to ${opts.runtime ?? runtimePath()}: ${err instanceof Error ? err.message : String(err)}` };
+  }
   const out: string[] = [];
   let exitCode = 0;
   for (const agent of names) {
@@ -292,7 +320,15 @@ export function initCommand(args: string[], opts: InitOptions): HookOutput {
   if (!remove && names.includes("copilot") && names.includes("claude")) {
     out.push("Note: Copilot CLI also reads .claude/settings.json. If both files are present, a repeated event is counted once.");
   }
-  if (!remove) out.push("Check it works: `agentshield doctor` runs every hook command the way the agent app does.");
+  if (!remove) {
+    out.push(
+      [
+        `Hooks run ${cli}.`,
+        "Next: `agentshield doctor` runs every hook command the way the agent app does; `agentshield setup` opens the settings page (rules in plain English, AI judge, test bench).",
+        "AI review is on: risky-looking commands (network, delete, database, cloud) and web pages the agent reads are also checked by AI, with secrets, your home folder and user name removed. Your prompts never leave. It can only make a decision stricter. Turn it off in setup, or add `ai_judge: off` to ~/.agentshield/config.yaml.",
+      ].join("\n"),
+    );
+  }
   const text = out.join("\n");
   return exitCode ? { exitCode, stderr: text } : { exitCode, stdout: text };
 }

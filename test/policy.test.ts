@@ -112,7 +112,7 @@ describe("P2: layers, strictest wins", () => {
 
   it("company extra commands and protected paths reach the engine", () => {
     const p = mergePolicy({ company: acme });
-    expect(run(cmd("kubectl delete namespace payments"), { policy: p }).action).toBe("ask");
+    expect(run(cmd("kubectl delete pod payments-1"), { policy: p }).action).toBe("ask");
     expect(run(cmd("cat infra/prod.tfstate"), { policy: p }).findings.map((f) => f.ruleId)).toContain("SEC-004");
   });
 });

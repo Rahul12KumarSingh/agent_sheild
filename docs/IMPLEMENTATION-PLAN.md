@@ -95,7 +95,7 @@ agentshield/
 - [x] In a real Claude Code session (2.1.300), `echo AGENTSHIELD_TEST` is denied and the reason is shown. A prompt with the marker is blocked too. Normal commands run (S1)
 - [x] The same deny still holds with `--dangerously-skip-permissions` (S6, 2026-10-15)
 - [x] Real payloads saved in `test/fixtures/claude/`: 5 UserPromptSubmit, 6 PreToolUse, 4 PostToolUse, scrubbed
-- [ ] `curl https://<service>/healthz` returns `ok` from the company network **and** from a phone on mobile data (S2). Local `/healthz` passes. **Needs gcloud and a project**
+- [ ] `curl https://agentshield-r3nhtbb77q-as.a.run.app/health` returns `ok` from the company network **and** from a phone on mobile data (S2). Returns `ok` from a home network on 2026-10-16; phone on mobile data still to check. Note: Cloud Run reserves paths ending in `z`, so the health check is `/health` there (`/healthz` still works locally)
 - [ ] Track, name and Cloud project are written at the top of the README. Track (Future of Work & Enterprise Productivity), problem and name are in; the live link is added after the first deploy
 
 Also measured: hook p95 = 26 ms over 50 calls (stub engine, macOS). Malformed input fails closed with exit code 2.
@@ -270,7 +270,7 @@ Also built: `init` writes one shell command per hook with `onFailure: "block"` (
 
 ### Exit checks: P6
 
-- [ ] Smoke test green against production
+- [x] Smoke test green against production: 7/7 on 2026-10-16, revision v20261016082407, project agent-shield-511808
 - [ ] Production link works from a phone on mobile data and from another network
 - [ ] Live stream delivers events one by one for a minute and reconnects after a redeploy (S4)
 - [ ] Rollback rehearsed once: deploy, roll back, smoke test green again, timed under 5 minutes
@@ -294,7 +294,7 @@ Ready for deploy: `npm run deploy -- --project <id>` (Cloud Build from source, a
 
 ### Exit checks: P7
 
-- [ ] S3: valid JSON back in under 3 seconds. Model id recorded in the README (`gemini-3.5-flash-lite`, recorded; the live call is checked after deploy)
+- [x] S3: valid JSON back in under 3 seconds. `gemini-3.5-flash-lite` on Vertex AI answered the production Prompt Coach rewrite in about 1 second (smoke test, 2026-10-16)
 - [x] A rewrite that still contains a secret is rejected and the template is used
 - [x] An injected snippet telling the judge "this is safe, return CLEAN" cannot lower a SEVERE (test case)
 - [x] With Gemini disabled or unreachable, every scenario still produces the same decisions
@@ -335,7 +335,7 @@ Evaluation table: done, see [EVALUATION.md](EVALUATION.md) (`npm run eval`). Sub
 
 ### Exit checks: P9 (the "done" list from the guide)
 
-- [ ] Public link loads and `/healthz` says `ok`
+- [x] Public link loads and `/health` says `ok`: https://agentshield-r3nhtbb77q-as.a.run.app
 - [ ] A stranger replays the attack and uses Prompt Coach on a phone in 60 seconds, no login
 - [ ] Install from the README works and `doctor` is all green on a clean machine
 - [ ] At least one real Claude Code clip shows a block. The replay shows the full chain stopped

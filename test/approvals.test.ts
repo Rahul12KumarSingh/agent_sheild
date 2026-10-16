@@ -33,7 +33,7 @@ describe("by default a yes in the app's prompt is once, the same in every app", 
     const first = await claudeGo("PreToolUse", "o1");
     expect(first.decision?.action).toBe("ask");
     expect(asked(first.output)).toContain("agentshield allow SEC-004 ");
-    expect(asked(first.output)).toContain("asks again next time");
+    expect(asked(first.output)).toContain("Reply allow to run it once");
     await claudeGo("PostToolUse", "o1");
     expect((await claudeGo("PreToolUse", "o2")).decision?.action).toBe("ask");
 
@@ -83,11 +83,11 @@ describe("opt-in session memory: a person's yes is remembered for the session", 
       runHook({ agent: "claude", raw: claude("sess", phase, id, tool, input), env, engine: POSIX, telemetry: false, policy: remember });
 
     const first = await go("PreToolUse", "a1", "Bash", { command: "cat .env" });
-    expect(JSON.parse(first.output.stdout!).hookSpecificOutput.permissionDecision).toBe("ask");
+    expect(first.decision?.action).toBe("ask");
     expect(first.decision?.asks?.[0]).toMatchObject({ ruleId: "SEC-004", rememberable: true });
 
     // The person said no (no result arrives): asked again.
-    expect(JSON.parse((await go("PreToolUse", "a2", "Bash", { command: "cat .env" })).output.stdout!).hookSpecificOutput.permissionDecision).toBe("ask");
+    expect((await go("PreToolUse", "a2", "Bash", { command: "cat .env" })).decision?.action).toBe("ask");
 
     // The person said yes: the command ran, and its result reached the hook.
     await go("PostToolUse", "a2", "Bash", { command: "cat .env" });
@@ -97,7 +97,7 @@ describe("opt-in session memory: a person's yes is remembered for the session", 
     // Same file through another tool: covered. The legs of the Rule of Two are untouched either way.
     expect((await go("PreToolUse", "a4", "Read", { file_path: `${POSIX_CWD}/.env` })).decision?.approved).toBe(true);
     // A different secret file is a new question.
-    expect(JSON.parse((await go("PreToolUse", "a5", "Bash", { command: "cat .env.production" })).output.stdout!).hookSpecificOutput.permissionDecision).toBe("ask");
+    expect((await go("PreToolUse", "a5", "Bash", { command: "cat .env.production" })).decision?.action).toBe("ask");
   });
 
   it("never lifts a block, and the Rule of Two still trips after an approval", async () => {
@@ -124,7 +124,7 @@ describe("opt-in session memory: a person's yes is remembered for the session", 
     expect(first.decision?.asks?.[0]?.rememberable).toBe(false);
     expect(first.output.stdout).not.toContain("will not ask again");
     await go("PostToolUse", "k1");
-    expect(JSON.parse((await go("PreToolUse", "k2")).output.stdout!).hookSpecificOutput.permissionDecision).toBe("ask");
+    expect((await go("PreToolUse", "k2")).decision?.action).toBe("ask");
   });
 
   it("asks that must be seen every time (sudo-like persistence, tampering scripts, policy commands) are never remembered", async () => {

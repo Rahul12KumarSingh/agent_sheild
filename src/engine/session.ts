@@ -34,12 +34,16 @@ export interface SessionState {
   blocks: number;
   /** Scripts this session wrote with risky commands in them (staged payloads), by resolved path. */
   scripts?: Record<string, FlaggedScript>;
-  /** Things a person approved in this session: approval id -> when. Covers the same thing again, never more. */
-  approved?: Record<string, string>;
+  /** Things a person approved in this session (opt-in `approvals: session`): approval id -> when. Covers the same thing again, never more. */
+  yes?: Record<string, string>;
   /** Asks waiting for the agent app to run the action: tool call -> what to remember if it runs. */
-  pending?: Record<string, PendingAsk>;
+  asked?: Record<string, PendingAsk>;
   /** The last action seen, to recognise the same call arriving twice (two hook files, one event). */
   last?: { sig: string; at: number };
+  /** The last action AgentShield paused for the user's approval (the hook layer manages these). */
+  pending?: { fp: string; summary: string; reason: string; at: string };
+  /** Actions the user allowed once by replying "allow". */
+  approved?: { fp: string; summary: string; at: string }[];
   createdAt: string;
   updatedAt: string;
 }

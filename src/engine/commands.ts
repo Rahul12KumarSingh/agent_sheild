@@ -146,7 +146,7 @@ const NET_CMDS = new Set([
 ]);
 const HOSTLIKE = /^(?:[\w-]+@)?((?:[\w-]+\.)+[a-z]{2,}|\d{1,3}(?:\.\d{1,3}){3})(?::\d+)?(?:[/:]|$)/i;
 
-function segmentHosts(s: Segment): string[] {
+export function segmentHosts(s: Segment): string[] {
   const hosts = urlHosts(s.text);
   for (const a of s.positional) {
     if (/^https?:/i.test(a)) continue;
@@ -408,15 +408,29 @@ const REMOTE_TO_SHELL: RegExp[] = [
 const EXECUTES_DECODED =
   /\|\s*(?:sudo\s+)?(?:(?:ba|z|da)?sh|python3?|node|perl|ruby|iex|invoke-expression)\b|\beval\b|\biex\b|invoke-expression|\b(?:powershell|pwsh)(?:\.exe)?\b[^|]*\s-e(?:nc\w*|c)?\b/i;
 
+const SHIELD_CLI = /^(agentshield|agentshield-hooks|agent-shield)(@[\w.^~-]+)?$/i;
+
+/** The arguments given to AgentShield's own CLI in this segment (npx, pnpm dlx, a global install or node <path>), if any. */
+function shieldCliArgs(s: Segment): string | undefined {
+  const rest = (args: string[]) => args.join(" ");
+  if (SHIELD_CLI.test(s.cmd)) return rest(s.args);
+  if (s.cmd === "node" && /agentshield|cli\.js/i.test(s.positional[0] ?? "")) return rest(s.args.slice(s.args.indexOf(s.positional[0]!) + 1));
+  if (["npx", "pnpx", "bunx", "pnpm", "yarn", "bun"].includes(s.cmd)) {
+    const i = s.args.findIndex((a) => SHIELD_CLI.test(a) || /^--package=(agentshield|agentshield-hooks|agent-shield)/i.test(a));
+    if (i >= 0) return rest(s.args.slice(i + 1).filter((a) => !SHIELD_CLI.test(a)));
+  }
+  return undefined;
+}
+
 function analyzeVariant(text: string, ctx: PathContext, excerpt: string, allowedHosts: string[]): Finding[] {
   const out: Finding[] = [];
   const segs = parseSegments(text);
 
   for (const s of segs) {
     // The agent loosening its own settings through our CLI is tampering, like editing the files directly.
-    if ((s.cmd === "agentshield" || (s.cmd === "node" && /agentshield|cli\.js/i.test(s.positional[0] ?? ""))) &&
-        /\bconfig\s+set\b|\binit\b|\ballow\b|\bapprovals?\s+(?:revoke|clear|remove)\b|\buninstall\b|\bsetup\b/i.test(s.args.join(" "))) {
-      out.push(hit("TAM-001", "agentshield settings", excerpt));
+    const shield = shieldCliArgs(s);
+    if (shield !== undefined && /\bconfig\s+set\b|\binit\b|\ballow\b|\bapprovals?\s+(?:revoke|clear|remove)\b|\buninstall\b|^\s*(?:setup|settings|ui|serve)\b/i.test(shield)) {
+      out.push(hit("TAM-001", `agentshield ${shield.split(" ").slice(0, 2).join(" ")}`, excerpt));
     }
 
     // Deleting
@@ -540,10 +554,16 @@ export interface CommandOptions {
   extraAskCommands?: string[];
 }
 
+// The agent's own guardrail files, named anywhere in a command, and signs the command writes to them.
+const GUARDRAIL_REF = /\.claude[\\/]settings(?:\.local)?\.json|\.agentshield[\\/]|managed-settings\.json|\.cursor[\\/]hooks\.json|\.github[\\/]hooks[\\/]|\.copilot[\\/]hooks/i;
+const WRITE_SIGNAL = /writeFile|appendFile|createWriteStream|\bopen\s*\([^)]*,\s*["'][wax+]|\.write\s*\(|json\.dump|\bsed\s+-i|\b(?:perl|ruby)\b[^\n]*\s-[a-z]*i|\btee\b|>\s*["']?[^\s&|>]|\bmv\b|\bcp\b|\brm\b|\bunlink|Set-Content|Add-Content|Out-File|Remove-Item|\btruncate\b|\bdd\b/i;
+
 export function analyzeCommand(command: string, ctx: PathContext, opts: CommandOptions = {}): CommandAnalysis {
   const norm = normalizeCommand(command);
   const excerpt = clip(redactSecrets(command));
   const findings: Finding[] = [];
+  // Inline code (node -e, python -c, perl -e, PowerShell) that writes the hook settings or AgentShield's files.
+  if (GUARDRAIL_REF.test(command) && WRITE_SIGNAL.test(command)) findings.push(hit("TAM-001", "the agent's guardrail settings, changed from a command", excerpt));
   for (const variant of norm.variants) findings.push(...analyzeVariant(variant, ctx, excerpt, opts.allowedHosts ?? []));
   if (norm.decoded.length && EXECUTES_DECODED.test(command)) findings.push(hit("EXE-002", undefined, excerpt));
   if (norm.disguised) findings.push(hit("OBF-001", undefined, excerpt));

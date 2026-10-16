@@ -86,7 +86,9 @@ describe("a search or a task cannot be used to get around the file and command r
     hook("claude", { hook_event_name: "PreToolUse", session_id: sid(), cwd: POSIX_CWD, tool_use_id: sid(), tool_name, tool_input });
   const asked = (out: { stdout?: string }) => {
     const json = out.stdout ? JSON.parse(out.stdout) : {};
-    return out.stdout?.includes("SEC-004") === true && (json.hookSpecificOutput?.permissionDecision ?? json.permissionDecision) === "ask";
+    // Claude Code pauses the step itself ("reply allow"); the other apps ask in their own prompt.
+    const said = json.hookSpecificOutput?.permissionDecision ?? json.permissionDecision;
+    return out.stdout?.includes("SEC-004") === true && (said === "ask" || (said === "deny" && out.stdout.includes("AgentShield paused")));
   };
 
   it.each([".env", "**/.env*", "**/.env.*", "**/*.pem", "{.env,.env.local}", "~/.aws/*", "**/id_rsa*"])("VS Code grep_search limited to %s asks, like reading the file", async (includePattern) => {
@@ -273,7 +275,8 @@ describe("answers in each app's own shape", () => {
 
   it("Claude Code keeps its documented shape exactly (no extra fields)", async () => {
     const out = await hook("claude", { hook_event_name: "PreToolUse", session_id: sid(), cwd: POSIX_CWD, tool_name: "Read", tool_input: { file_path: `${POSIX_CWD}/.env` }, tool_use_id: "t" });
-    expect(Object.keys(JSON.parse(out.stdout!))).toEqual(["hookSpecificOutput"]);
+    // Claude Code gets its documented answer plus the line a person sees (systemMessage).
+    expect(Object.keys(JSON.parse(out.stdout!)).sort()).toEqual(["hookSpecificOutput", "systemMessage"]);
   });
 
   it("Gemini and Windsurf answer with exit codes only, and a quarantine note for Gemini results", async () => {

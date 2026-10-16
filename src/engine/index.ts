@@ -3,6 +3,7 @@ import { DEFAULT_POLICY, type EffectivePolicy } from "../policy/index.js";
 import { allCovered, approvalId, eventSig, eventSigs, itemOf, needsApproval, promote, recordPending, type ApprovedLookup } from "./approvals.js";
 import { clip, dedupe, hit, RULES, type RuleId } from "./catalog.js";
 import { analyzeCommand, commandFindingsInContent, gitGates, type GitGate, isDumpHost, type OutsideAction, urlHosts } from "./commands.js";
+import { customRuleFindings } from "./custom.js";
 import { analyzeDiff } from "./diff.js";
 import { exfilRequest, findSecrets, injectionFindings, piiFindings, type PiiOptions, redactSecrets, rewritePrompt } from "./detectors.js";
 import { MAX_SCAN } from "./normalize.js";
@@ -164,6 +165,12 @@ function analyzeAction(e: ActionEvent, c: Ctx): Analysis {
     }
   }
 
+  // The team's own rules (custom_rules in the policy).
+  if (c.policy.customRules.length) {
+    const text = kind === "write" ? writtenContent(e.input).slice(0, MAX_SCAN) : kind === "command" ? undefined : JSON.stringify(e.input).slice(0, MAX_SCAN);
+    findings.push(...customRuleFindings(c.policy.customRules, { kind, command: kind === "command" ? String(e.input.command) : undefined, filePath: paths[0], text }, ctx));
+  }
+
   // Anything the tool sends out: live secrets and data-dump sites, in any field. Looking at local files sends nothing out.
   if (kind !== "write" && kind !== "delete" && !isLocalOnlyTool(e.tool)) {
     const raw = JSON.stringify(e.input).slice(0, MAX_SCAN);
@@ -193,6 +200,7 @@ function analyzePrompt(text: string, c: Ctx): Finding[] {
   findings.push(...piiFindings(text, c.pii));
   const exfil = exfilRequest(text);
   if (exfil) findings.push(hit("EXF-006", undefined, exfil));
+  if (c.policy.customRules.length) findings.push(...customRuleFindings(c.policy.customRules, { kind: "prompt", text }, c.paths));
   return findings;
 }
 
@@ -292,7 +300,7 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   const rememberYes = settings.approvals === "session" && !appRemembers;
   let approved = false;
   if (action === "ask" && event.kind === "action" && !ruleOfTwo && !breaker && settings.approvals !== "off") {
-    const lookup: ApprovedLookup = (rule, target) => (settings.approvals === "session" && !appRemembers && Boolean(session?.approved?.[approvalId(rule, target)])) || Boolean(opts.approved?.(rule, target));
+    const lookup: ApprovedLookup = (rule, target) => (settings.approvals === "session" && !appRemembers && Boolean(session?.yes?.[approvalId(rule, target)])) || Boolean(opts.approved?.(rule, target));
     if (allCovered(findings, lookup)) {
       action = "note";
       approved = true;
@@ -305,7 +313,7 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
     const top = findings[0]!;
     const more = findings.length > 1 ? ` (+${findings.length - 1} more: ${findings.slice(1).map((f) => f.ruleId).join(", ")})` : "";
     reason = `${top.reason}${analysis.disguised && top.ruleId !== "OBF-001" ? ". The command was disguised" : ""}${more}`;
-    safeAlternative = RULES[top.ruleId as RuleId]?.alternative ?? "Ask the user to do this step themselves.";
+    safeAlternative = top.alternative ?? RULES[top.ruleId as RuleId]?.alternative ?? "Ask the user to do this step themselves.";
     if (event.kind === "prompt") {
       const rewritten = rewritePrompt(event.text);
       if (rewritten !== event.text) safeAlternative = rewritten;

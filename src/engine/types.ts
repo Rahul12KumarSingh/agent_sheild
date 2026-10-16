@@ -69,6 +69,8 @@ export interface Finding {
   excerpt?: string;
   /** What the finding is about (a resolved path, a host or a command), used to remember an approval. */
   target?: string;
+  /** A rule-specific safe alternative (custom rules); otherwise the catalog's. */
+  alternative?: string;
 }
 
 /** One thing a person is asked to approve. Approving it once can cover the same thing for the rest of the session. */
@@ -97,6 +99,8 @@ export interface Decision {
   approved?: boolean;
   /** What a person is being asked to approve (action "ask", or a deny because the agent app cannot ask). */
   asks?: ApprovalItem[];
+  /** AgentShield's own approval flow (Claude Code): paused for the user, allowed once, or the user's "allow". */
+  approval?: { state: "needed" | "granted" | "acknowledged"; summary: string };
   /** The Rule of Two legs after this event (A stranger's text, B sensitive data, C this action reaches outside). */
   session?: { A?: string; B?: string; C?: string; blocks: number; ruleOfTwo: boolean };
 }

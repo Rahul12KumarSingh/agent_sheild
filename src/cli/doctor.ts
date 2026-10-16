@@ -5,8 +5,9 @@ import { basename, join } from "node:path";
 import type { HookOutput } from "../adapters/types.js";
 import { evaluate } from "../engine/index.js";
 import { listApprovals } from "../hook/approvals-store.js";
+import { DEFAULT_AI_ENDPOINT } from "../hook/ai.js";
 import { loadPolicyAsync, userDir } from "../policy/index.js";
-import { AGENT_NAMES, type AgentName, cliPath, isOurCommand, targetFor } from "./init.js";
+import { AGENT_NAMES, type AgentName, cliPath, isOurCommand, runtimePath, targetFor } from "./init.js";
 
 type Status = "ok" | "warn" | "fail";
 interface Check {
@@ -201,10 +202,14 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
         if (legacy.length) {
           add("fail", `${path}: ${legacy.length} hook(s) use the old exec form (command "node" plus args). Copilot CLI, Cursor and VS Code ignore the args, run bare \`node\`, and every tool call is denied as "hook errored". Run \`agentshield init${agent === "claude" ? "" : ` --agent ${agent}`}\` to rewrite them`);
         }
-        const target = /"([^"]*cli\.js)"|(\S*cli\.js)/i.exec(mine[0]!.command);
-        const targetPath = target?.[1] ?? target?.[2];
-        if (targetPath && !existsSync(targetPath)) add("fail", `${path} points at ${targetPath}, which does not exist (run agentshield init${agent === "claude" ? "" : ` --agent ${agent}`})`);
-        else if (targetPath && targetPath.replace(/\\/g, "/") !== cli) add("warn", `${path} points at ${targetPath}, not this copy (${cli})`);
+        const target = /"([^"]*(?:cli\.js|agentshield\.mjs))"|(\S*(?:cli\.js|agentshield\.mjs))/i.exec(mine[0]!.command);
+        const targetPath = (target?.[1] ?? target?.[2])?.replace(/\\/g, "/");
+        const fix = `run agentshield init${agent === "claude" ? "" : ` --agent ${agent}`}`;
+        if (targetPath && !existsSync(targetPath)) add("fail", `${path} points at ${targetPath}, which does not exist (${fix})`);
+        else if (targetPath && targetPath === cliPath(runtimePath())) {
+          // The usual install: init's own copy. Warn only when it is older than the AgentShield running doctor.
+          if (targetPath !== cli && existsSync(opts.cli) && !readFileSync(targetPath).equals(readFileSync(opts.cli))) add("warn", `${path} runs an older copy of AgentShield (${targetPath}). ${fix[0]!.toUpperCase()}${fix.slice(1)} to update it`);
+        } else if (targetPath && targetPath !== cli) add("warn", `${path} points at ${targetPath}, not this copy (${cli})`);
 
         // Run the command from the file, exactly as the app would.
         const hook = mine.find((h) => h.event === SHELL_EVENT[agent]) ?? mine[0]!;
@@ -249,6 +254,16 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
     add("ok", `Policy loads: ${p.name}, mode ${p.mode.toUpperCase()}, profile ${p.profile}`);
     if (p.mode === "monitor") add("warn", "Monitor mode: nothing is blocked, events are only logged");
     for (const w of p.warnings) add("warn", `Policy: ${w}`);
+    if (p.customRules.length) add("ok", `Custom rules: ${p.customRules.length} (${[...new Set(p.customRules.map((r) => r.source))].join(", ")})`);
+    if (p.settings.ai_judge === "off" || opts.env.AGENTSHIELD_AI === "off") add("ok", "AI review: off (rules only, nothing leaves this computer)");
+    else {
+      const via = opts.env.GEMINI_API_KEY ? "your own AI key (GEMINI_API_KEY)" : `the AgentShield cloud (${p.aiEndpoint ?? DEFAULT_AI_ENDPOINT})`;
+      let paused = false;
+      try {
+        paused = (JSON.parse(readFileSync(join(userDir(opts.env), "ai-cache.json"), "utf8")) as { pausedUntil?: number }).pausedUntil! > Date.now();
+      } catch {}
+      add(paused ? "warn" : "ok", `AI review: ${p.settings.ai_judge}, via ${via}${paused ? ". Paused for a few minutes after repeated failures (offline or blocked network); rules still decide" : ""}`);
+    }
   } catch (err) {
     add("fail", `A policy file could not be loaded: ${err instanceof Error ? err.message : String(err)}. AgentShield keeps working on its strict built-in rules (warnings are blocked, nothing is remembered) until the file is fixed`);
   }
@@ -290,7 +305,7 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
     const p = await loadPolicyAsync({ cwd: opts.cwd, env: opts.env });
     if (p.consoleUrl) {
       try {
-        const r = await fetch(new URL("/healthz", p.consoleUrl), { signal: AbortSignal.timeout(1500) });
+        const r = await fetch(new URL("/health", p.consoleUrl), { signal: AbortSignal.timeout(1500) });
         add(r.ok ? "ok" : "warn", `Console ${p.consoleUrl} ${r.ok ? "is reachable" : `answered ${r.status}`}`);
       } catch {
         add("warn", `Console ${p.consoleUrl} is not reachable (decisions are unaffected; events stay in the local log)`);

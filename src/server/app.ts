@@ -10,11 +10,13 @@ import { RULES } from "../engine/catalog.js";
 import { riskySpans, rewritePrompt } from "../engine/detectors.js";
 import { evaluate } from "../engine/index.js";
 import type { Decision } from "../engine/types.js";
-import { applyJudge, explain, type JudgeResult, judge, type Rewrite, rewrite } from "../gemini/advisor.js";
+import { applyJudge, draftRules, explain, type JudgeResult, judge, judgeAction, type Rewrite, rewrite } from "../gemini/advisor.js";
 import type { Gemini } from "../gemini/client.js";
 import type { ShieldRecord } from "../hook/telemetry.js";
-import { type EffectivePolicy, mergePolicy, type PolicyFile } from "../policy/index.js";
+import { type CustomRule, type EffectivePolicy, mergePolicy, parseCustomRules, type PolicyFile } from "../policy/index.js";
 import { Feed, RateLimiter, sanitizeIncoming } from "./feed.js";
+import { type LocalOptions, mountLocal } from "./local.js";
+import { checkDraft, withRules } from "./rulecheck.js";
 import { runScenario, type Scenario } from "./scenarios.js";
 
 export interface AppOptions {
@@ -31,10 +33,12 @@ export interface AppOptions {
   /** Accept hook events without a token. Off on Cloud Run unless a token is set. */
   ingestOpen?: boolean;
   version?: string;
+  /** `agentshield setup`: the settings page may read and write this developer's policy files. */
+  local?: Omit<LocalOptions, "gemini">;
 }
 
 const MAX_SSE = 200;
-const LIMITS = { evaluate: 30, scenario: 20, explain: 12, ingest: 240 } as const;
+const LIMITS = { evaluate: 30, scenario: 20, explain: 12, ingest: 240, ai: 90, draft: 15 } as const;
 
 const MIME: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -119,6 +123,8 @@ export function createApp(opts: AppOptions) {
     c.header("Cache-Control", "no-store");
   });
 
+  // Cloud Run's front end reserves paths ending in "z", so /healthz never reaches us there: use /health.
+  app.get("/health", (c) => c.text("ok"));
   app.get("/healthz", (c) => c.text("ok"));
 
   app.get("/api/info", (c) =>
@@ -128,7 +134,8 @@ export function createApp(opts: AppOptions) {
       policy: { name: basePolicy.name, mode: basePolicy.mode, profile: basePolicy.profile },
       gemini: opts.gemini.status,
       counters: feed.counters,
-      demo: true,
+      demo: !opts.local,
+      local: Boolean(opts.local),
     }),
   );
 
@@ -205,6 +212,15 @@ export function createApp(opts: AppOptions) {
     } catch {
       return c.json({ error: `Unknown profile "${profile}".` }, 400);
     }
+    // Rule Studio on the public console: try draft rules without saving anything.
+    const rawRules = (body as { rules?: unknown }).rules;
+    if (rawRules !== undefined) {
+      try {
+        policy = withRules(policy, parseCustomRules(rawRules, "rules"));
+      } catch (err) {
+        return c.json({ error: err instanceof Error ? err.message : String(err) }, 422);
+      }
+    }
     const mode = body.mode === "command" || body.mode === "prompt" ? body.mode : "auto";
     const base = { agent: "scripted" as const, sessionId: "coach", cwd: "/home/dev/acme-payments", headless: false };
     const engine = { home: "/home/dev", tmpDirs: ["/tmp"] };
@@ -215,7 +231,7 @@ export function createApp(opts: AppOptions) {
 
     let judged: JudgeResult | undefined;
     let rewritten: Rewrite | undefined;
-    const key = createHash("sha256").update(`${policy.profile}\n${as}\n${text}`).digest("hex");
+    const key = createHash("sha256").update(`${policy.profile}\n${as}\n${JSON.stringify(rawRules ?? null)}\n${text}`).digest("hex");
     const cached = geminiCache.get(key);
     if (as === "prompt") {
       const template = decision.level === "CLEAN" ? undefined : (decision.safeAlternative ?? rewritePrompt(text));
@@ -305,6 +321,49 @@ export function createApp(opts: AppOptions) {
       return c.json({ error: `Gemini did not answer in time (${err instanceof Error ? err.message.slice(0, 60) : "error"}).` }, 504);
     }
   });
+
+  // ---------- AI for developers' machines: the hook's live judge and the settings page's rule writer ----------
+  // Hooks without their own GEMINI_API_KEY ask here. Secrets are removed before the request leaves the laptop;
+  // the server keeps nothing, answers in a fixed shape, and is rate-limited per address.
+
+  const aiCache = new Map<string, { level: string; reason: string; model: string }>();
+  app.post("/api/ai/judge", async (c) => {
+    if (limited(c, "ai")) return tooMany(c);
+    if (!opts.gemini.status.enabled) return c.json({ error: "Gemini is not configured on this server." }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as { kind?: unknown; text?: unknown };
+    const text = typeof body.text === "string" ? body.text : "";
+    if (!text.trim() || text.length > 4000 || (body.kind !== "command" && body.kind !== "content")) return c.json({ error: "Send kind (command or content) and 1 to 4000 characters of text." }, 400);
+    const key = createHash("sha256").update(`${body.kind}\n${text}`).digest("hex");
+    const hit = aiCache.get(key);
+    if (hit) return c.json({ ...hit, cached: true });
+    try {
+      const v = body.kind === "command" ? await judgeAction(opts.gemini, text) : await judge(opts.gemini, text);
+      if (!v) return c.json({ error: "no verdict" }, 502);
+      const out = { level: v.level, reason: v.reason, model: v.model };
+      if (aiCache.size > 2000) aiCache.delete(aiCache.keys().next().value!);
+      aiCache.set(key, out);
+      return c.json({ ...out, ms: v.ms });
+    } catch (err) {
+      return c.json({ error: `Gemini did not answer in time (${err instanceof Error ? err.message.slice(0, 60) : "error"}).` }, 504);
+    }
+  });
+
+  app.post("/api/ai/draft-rules", async (c) => {
+    if (limited(c, "draft")) return tooMany(c);
+    if (!opts.gemini.status.enabled) return c.json({ error: "Gemini is not configured on this server." }, 503);
+    const body = (await c.req.json().catch(() => ({}))) as { description?: unknown };
+    const description = typeof body.description === "string" ? body.description.trim() : "";
+    if (description.length < 3 || description.length > 600) return c.json({ error: "Describe the rule in a sentence or two (3 to 600 characters)." }, 400);
+    try {
+      const draft = await draftRules(opts.gemini, description);
+      const check = checkDraft(draft.rules, draft.examples, basePolicy, { cwd: "/home/dev/project", home: "/home/dev", tmpDirs: ["/tmp"] });
+      return c.json({ ...draft, check, via: "the AgentShield cloud" });
+    } catch (err) {
+      return c.json({ error: `Gemini did not answer in time (${err instanceof Error ? err.message.slice(0, 60) : "error"}).` }, 504);
+    }
+  });
+
+  if (opts.local) mountLocal(app, { ...opts.local, gemini: opts.gemini });
 
   app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
 

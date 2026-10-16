@@ -64,7 +64,9 @@ describe("P3: the Rule of Two", () => {
 
   it("B + C without A follows normal rules (read .env, then npm publish)", () => {
     const d = chain([act("Read", { file_path: "/home/dev/project/.env" }), res("Read", { file_path: "/home/dev/project/.env" }, "X=1"), bash("npm publish")]);
-    expect(d.at(-1)!.action).toBe("allow");
+    // Not the Rule of Two: only the publishing guardrail asks, as it would for anyone.
+    expect(d.at(-1)!.action).toBe("ask");
+    expect(d.at(-1)!.findings.map((f) => f.ruleId)).toEqual(["GRD-002"]);
     expect(d.at(-1)!.session?.C).toContain("publishes");
     expect(d.at(-1)!.session?.ruleOfTwo).toBe(false);
   });

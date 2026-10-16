@@ -83,24 +83,24 @@ export function recordPending(state: SessionState, sigs: string[], items: Approv
   const keep = items.filter((i) => i.rememberable);
   if (keep.length === 0) return state;
   const pending: Record<string, PendingAsk> = {};
-  for (const [k, v] of Object.entries(state.pending ?? {})) if (now.getTime() - Date.parse(v.at) < HOUR) pending[k] = v;
+  for (const [k, v] of Object.entries(state.asked ?? {})) if (now.getTime() - Date.parse(v.at) < HOUR) pending[k] = v;
   const ask: PendingAsk = { at: now.toISOString(), items: keep.map((i) => ({ id: approvalId(i.ruleId, i.target), ruleId: i.ruleId, target: i.target, label: i.label })) };
   for (const sig of sigs) pending[sig] = ask;
   const keys = Object.keys(pending);
   for (const k of keys.slice(0, Math.max(0, keys.length - 60))) delete pending[k];
-  return { ...state, pending };
+  return { ...state, asked: pending };
 }
 
 /** The result of a call we asked about arrived: a person said yes, so remember it. */
 export function promote(state: SessionState, sigs: string[], now = new Date()): SessionState {
-  const ask = sigs.map((s) => state.pending?.[s]).find(Boolean);
+  const ask = sigs.map((s) => state.asked?.[s]).find(Boolean);
   if (!ask) return state;
-  const approved = { ...state.approved };
+  const approved = { ...state.yes };
   for (const item of ask.items) approved[item.id] = now.toISOString();
-  const pending = { ...state.pending };
+  const pending = { ...state.asked };
   // The same ask may be filed under several signatures.
   for (const [k, v] of Object.entries(pending)) if (v.at === ask.at && v.items[0]?.id === ask.items[0]?.id) delete pending[k];
   const ids = Object.keys(approved);
   for (const k of ids.slice(0, Math.max(0, ids.length - 200))) delete approved[k];
-  return { ...state, approved, pending };
+  return { ...state, yes: approved, asked: pending };
 }
