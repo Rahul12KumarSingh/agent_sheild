@@ -170,7 +170,7 @@ export function riskySpans(text: string, opts: PiiOptions = {}): Span[] {
       from = i + p.value.length;
     }
   }
-  for (const re of [...INJECTION_PHRASES, EXFIL_INSTRUCTION]) {
+  for (const re of [...INJECTION_PHRASES, EXFIL_INSTRUCTION, SECRET_THEN_SEND]) {
     const m = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`).exec(t);
     if (m) spans.push({ start: m.index, end: m.index + m[0].length, label: "INSTRUCTION" });
   }
@@ -214,8 +214,12 @@ const EXFIL_INSTRUCTION =
 const hasPhrase = (s: string) => INJECTION_PHRASES.some((re) => re.test(s));
 
 /** A prompt asking the agent to send secrets somewhere: the user may not realise what they are asking for. */
+const SECRET_THEN_SEND =
+  /(?:\.env\b|credentials|secrets?\b|api[\s_-]?keys?|tokens?\b|passwords?|ssh\s+keys?|id_rsa)[^\n]{0,60}?\b(?:send|post|upload|paste|share|forward|transmit)\b[^\n]{0,80}?(?:https?:\/\/|webhook|pastebin|\bgist\b)/i;
+
 export function exfilRequest(text: string): string | undefined {
-  const m = EXFIL_INSTRUCTION.exec(text.slice(0, MAX_SCAN));
+  const t = text.slice(0, MAX_SCAN);
+  const m = EXFIL_INSTRUCTION.exec(t) ?? SECRET_THEN_SEND.exec(t);
   return m ? clip(redactSecrets(m[0])) : undefined;
 }
 

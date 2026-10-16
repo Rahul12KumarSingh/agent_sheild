@@ -53,6 +53,16 @@ const PLACEHOLDER = `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <body style="font-family:system-ui,sans-serif;max-width:640px;margin:40px auto;padding:0 16px"><h1>AgentShield</h1>
 <p>The API is running. The console has not been built: run <code>npm run build</code>.</p></body></html>`;
 
+const COMMAND_WORDS = /^(sudo|rm|rd|del|curl|wget|cat|type|less|head|tail|git|gh|npm|npx|pnpm|yarn|pip|pip3|python3?|node|bash|sh|zsh|pwsh|powershell|cmd|echo|printf|ls|dir|cp|mv|chmod|chown|dd|mkfs|find|scp|rsync|ssh|nc|ncat|docker|kubectl|helm|terraform|aws|gcloud|az|crontab|iex|iwr|irm|env|printenv|export|set|agentshield|sed|awk|grep|tar|zip|base64|eval|source)$/i;
+
+/** Prompt Coach "auto": prose is a prompt; something that reads like a shell command is a command. */
+export function looksLikeCommand(text: string): boolean {
+  const t = text.trim();
+  if (!t || t.split("\n").length > 3) return false;
+  const first = t.split(/\s+/)[0]!.replace(/^["'&(]+/, "");
+  return COMMAND_WORDS.test(first) || /^[A-Z][a-z]+-[A-Z][A-Za-z]+$/.test(first) || /^(\.{1,2}|~)?\//.test(first) || /^[a-z]:\\/i.test(first);
+}
+
 export function createApp(opts: AppOptions) {
   const app = new Hono();
   const feed = new Feed();
@@ -200,7 +210,7 @@ export function createApp(opts: AppOptions) {
     const engine = { home: "/home/dev", tmpDirs: ["/tmp"] };
     const asPrompt = evaluate({ ...base, kind: "prompt", text }, engine, { policy });
     const asCommand = evaluate({ ...base, kind: "action", tool: "Bash", input: { command: text } }, engine, { policy });
-    const as = mode === "auto" ? (asCommand.score > asPrompt.score ? "command" : "prompt") : mode;
+    const as = mode === "auto" ? (looksLikeCommand(text) ? "command" : "prompt") : mode;
     let decision: Decision = as === "command" ? asCommand : asPrompt;
 
     let judged: JudgeResult | undefined;

@@ -12,7 +12,8 @@ export default defineConfig({
   bundle: true,
   noExternal: [/.*/],
   splitting: false,
-  clean: true,
+  // Only our own bundles: dist/console is built by Vite and must survive a server rebuild.
+  clean: ["cli.js", "server.js", "mcp.js"],
   sourcemap: false,
   // Some bundled CommonJS dependencies (yaml) call require() for Node built-ins.
   banner: { js: '#!/usr/bin/env node\nimport { createRequire as __agentshieldRequire } from "node:module";\nconst require = __agentshieldRequire(import.meta.url);' },

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,13 +10,15 @@ import { loadScenarios } from "./scenarios.js";
 
 // Layout is the same in the repository and in the container: dist/server.js next to scenarios/ and policies/.
 const here = dirname(fileURLToPath(import.meta.url));
-const findDir = (...candidates: string[]) => candidates.map((c) => resolve(c)).find((c) => existsSync(c));
 const env = process.env;
+const first = (kind: "file" | "dir", ...candidates: (string | undefined)[]) =>
+  candidates
+    .filter((c): c is string => Boolean(c))
+    .map((c) => resolve(c))
+    .find((c) => existsSync(c) && (kind === "dir" ? statSync(c).isDirectory() : statSync(c).isFile()));
 
-const scenariosDir = findDir(env.AGENTSHIELD_SCENARIOS_DIR ?? "", join(here, "..", "scenarios"), join(process.cwd(), "scenarios"));
-const policyPath = [env.AGENTSHIELD_DEMO_POLICY ?? "", join(here, "..", "policies", "acme-bank-demo.yaml"), join(process.cwd(), "policies", "acme-bank-demo.yaml")]
-  .map((p) => resolve(p))
-  .find((p) => p && existsSync(p));
+const scenariosDir = first("dir", env.AGENTSHIELD_SCENARIOS_DIR, join(here, "..", "scenarios"), join(process.cwd(), "scenarios"));
+const policyPath = first("file", env.AGENTSHIELD_DEMO_POLICY, join(here, "..", "policies", "acme-bank-demo.yaml"), join(process.cwd(), "policies", "acme-bank-demo.yaml"));
 if (!scenariosDir || !policyPath) {
   console.error("AgentShield server: cannot find scenarios/ or policies/acme-bank-demo.yaml next to the build.");
   process.exit(1);
@@ -33,7 +35,7 @@ const { app, seed } = createApp({
   scenarios: loadScenarios(scenariosDir),
   stateDir: mkdtempSync(join(tmpdir(), "agentshield-server-")),
   gemini,
-  consoleDir: findDir(join(here, "console")),
+  consoleDir: first("dir", join(here, "console")),
   ingestToken: env.AGENTSHIELD_INGEST_TOKEN || undefined,
   ingestOpen: env.AGENTSHIELD_INGEST_OPEN === "1" || (!onCloudRun && !env.AGENTSHIELD_INGEST_TOKEN),
   version: env.K_REVISION ?? env.AGENTSHIELD_VERSION ?? "local",
