@@ -11,21 +11,21 @@ import { FAKE_AWS_KEY, POSIX } from "./helpers.js";
 
 const ROOT = join(import.meta.dirname, "..");
 const run = (raw: string, headless = false) => {
-  const e = parseCopilot(raw, headless);
+  const e = parseCopilot(raw, headless)!;
   return formatCopilot(evaluate(e, POSIX), e);
 };
 const camelPre = (toolName: string, toolArgs: unknown) => JSON.stringify({ sessionId: "c1", timestamp: 1760000000000, cwd: "/home/dev/project", toolName, toolArgs });
 
 describe("P8: GitHub Copilot adapter", () => {
   it("parses camelCase payloads by shape, with toolArgs as a JSON string or an object", () => {
-    expect(parseCopilot(camelPre("bash", JSON.stringify({ command: "ls" })), false)).toMatchObject({ kind: "action", tool: "bash", input: { command: "ls" } });
-    expect(parseCopilot(camelPre("view", { path: "/home/dev/project/.env" }), false)).toMatchObject({ kind: "action", input: { path: "/home/dev/project/.env" } });
+    expect(parseCopilot(camelPre("bash", JSON.stringify({ command: "ls" })), false)).toMatchObject({ kind: "action", tool: "Bash", rawTool: "bash", input: { command: "ls" } });
+    expect(parseCopilot(camelPre("view", { path: "/home/dev/project/.env" }), false)).toMatchObject({ kind: "action", tool: "Read", input: { path: "/home/dev/project/.env", file_path: "/home/dev/project/.env" } });
     expect(parseCopilot(JSON.stringify({ sessionId: "c1", cwd: "/p", prompt: "hi" }), false)).toMatchObject({ kind: "prompt", text: "hi" });
     expect(parseCopilot(JSON.stringify({ sessionId: "c1", cwd: "/p", toolName: "web_fetch", toolArgs: { url: "https://x.example" }, toolResult: { resultType: "success", textResultForLlm: "hello" } }), false)).toMatchObject({ kind: "result", output: "hello" });
   });
 
   it("parses the VS Code compatible (snake_case) payloads", () => {
-    const e = parseCopilot(JSON.stringify({ hook_event_name: "PreToolUse", session_id: "v1", cwd: "/p", tool_name: "Bash", tool_input: { command: "npm test" } }), false);
+    const e = parseCopilot(JSON.stringify({ hook_event_name: "PreToolUse", session_id: "v1", timestamp: "2026-10-16T08:00:00Z", cwd: "/p", tool_name: "Bash", tool_input: { command: "npm test" } }), false);
     expect(e).toMatchObject({ agent: "copilot", kind: "action", tool: "Bash", sessionId: "v1" });
   });
 
@@ -43,12 +43,15 @@ describe("P8: GitHub Copilot adapter", () => {
   });
 
   it("flags a written file the Copilot way (create with file_text)", () => {
-    const e = parseCopilot(camelPre("create", { path: "/home/dev/project/.claude/settings.json", file_text: "{}" }), false);
+    const e = parseCopilot(camelPre("create", { path: "/home/dev/project/.claude/settings.json", file_text: "{}" }), false)!;
     expect(evaluate(e, POSIX).findings.map((f) => f.ruleId)).toContain("TAM-001");
   });
 
-  it("cannot block prompts (Copilot limitation): records and stays silent", () => {
-    expect(run(JSON.stringify({ sessionId: "c1", cwd: "/p", prompt: `deploy with ${FAKE_AWS_KEY}` }))).toEqual({ exitCode: 0 });
+  it("cannot stop a prompt (Copilot CLI limitation): shows the reason as a warning and records it", () => {
+    const out = run(JSON.stringify({ sessionId: "c1", cwd: "/p", prompt: `deploy with ${FAKE_AWS_KEY}` }));
+    expect(out.exitCode).toBe(2);
+    expect(out.stderr).toContain("blocked this prompt");
+    expect(out.stdout).toBeUndefined();
   });
 
   it("adds a note to a tool result that carries an injection", () => {
@@ -105,8 +108,10 @@ describe("P8: Claude Code plugin package", () => {
     expect(json(".claude-plugin/plugin.json").name).toBe("agentshield");
     const hooks = json("hooks/hooks.json").hooks;
     expect(Object.keys(hooks)).toEqual(["UserPromptSubmit", "PreToolUse", "PostToolUse"]);
-    for (const groups of Object.values(hooks) as { hooks: { args: string[]; onFailure: string }[] }[][]) {
-      expect(groups[0]!.hooks[0]!.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"]);
+    for (const groups of Object.values(hooks) as { hooks: { command: string; args?: string[]; onFailure: string }[] }[][]) {
+      // One shell string: Copilot CLI and Cursor can read plugin hooks too, and ignore exec-form args.
+      expect(groups[0]!.hooks[0]!.command).toBe('node "${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js" hook claude');
+      expect(groups[0]!.hooks[0]!.args).toBeUndefined();
       expect(groups[0]!.hooks[0]!.onFailure).toBe("block");
     }
     expect(json(".mcp.json").mcpServers.agentshield.args).toContain("mcp");

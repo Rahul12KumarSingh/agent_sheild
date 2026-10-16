@@ -27,9 +27,9 @@ export function capturePayload(agent: string, raw: string, dir = process.env.AGE
   try {
     let event = "unknown";
     try {
-      const p = JSON.parse(raw) as { hook_event_name?: string; prompt?: unknown; toolResult?: unknown; toolName?: unknown };
-      // Copilot's camelCase payloads carry no event name: tell them apart by shape.
-      event = String(p.hook_event_name ?? (p.prompt !== undefined ? "userPromptSubmitted" : p.toolResult !== undefined ? "postToolUse" : p.toolName !== undefined ? "preToolUse" : "unknown"));
+      const p = JSON.parse(raw) as { hook_event_name?: string; agent_action_name?: string; prompt?: unknown; toolResult?: unknown; toolName?: unknown };
+      // Copilot's camelCase payloads carry no event name: tell them apart by shape. Windsurf names its event differently.
+      event = String(p.hook_event_name ?? p.agent_action_name ?? (p.prompt !== undefined ? "userPromptSubmitted" : p.toolResult !== undefined ? "postToolUse" : p.toolName !== undefined ? "preToolUse" : "unknown"));
     } catch {}
     const target = join(dir, agent);
     mkdirSync(target, { recursive: true });

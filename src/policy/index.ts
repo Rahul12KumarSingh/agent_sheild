@@ -26,6 +26,7 @@ export const BUILTIN: PolicyFile = {
   mild_notes: "on",
   coach_messages: "always",
   outside_reads: "allow",
+  approvals: "session",
   allow_test_data: false,
   circuit_breaker: 3,
   allowed_hosts: [
@@ -54,8 +55,9 @@ export const BUILTIN: PolicyFile = {
       warning_action: "block",
       coach_messages: "always",
       outside_reads: "ask",
+      approvals: "off",
       circuit_breaker: 2,
-      locked: ["warning_action", "allowed_hosts", "allowed_remotes", "trusted_mcp_servers", "coach_messages", "mild_notes", "outside_reads", "circuit_breaker"],
+      locked: ["warning_action", "allowed_hosts", "allowed_remotes", "trusted_mcp_servers", "coach_messages", "mild_notes", "outside_reads", "approvals", "circuit_breaker"],
     },
   },
 };
@@ -350,6 +352,19 @@ export function loadPolicy(opts: LoadOptions): EffectivePolicy {
 
 /** Engine default when no policy is given (tests, `check` without files). */
 export const DEFAULT_POLICY: EffectivePolicy = mergePolicy({});
+
+/**
+ * Used when a policy file cannot be loaded. The agent keeps working, but on the strict built-in rules:
+ * warnings become blocks and nothing is remembered, so a broken file never loosens anything and never bricks the agent.
+ */
+export function fallbackPolicy(reason: string): EffectivePolicy {
+  const p = structuredClone(DEFAULT_POLICY);
+  p.name = "AgentShield built-in rules (a policy file could not be loaded)";
+  p.settings.warning_action = "block";
+  p.settings.approvals = "off";
+  p.warnings = [`A policy file could not be loaded, so the strict built-in rules are in use: ${reason}`];
+  return p;
+}
 
 export function explain(policy: EffectivePolicy, key: SettingKey): string[] {
   const value = policy.settings[key];

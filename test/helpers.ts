@@ -40,3 +40,14 @@ export const psEncoded = (s: string) => Buffer.from(s, "utf16le").toString("base
 /** A fake, live-looking key. Never a real one. */
 export const FAKE_AWS_KEY = "AKIAZ7Q4M2LX9TRB3KPW";
 export const FAKE_GITHUB_TOKEN = "ghp_a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8";
+
+/** A unified diff (`git diff -U0` style) that adds the given lines to one file. */
+export function fakeDiff(path: string, added: string[], mode: "new" | "modify" = "modify"): string {
+  return [
+    `diff --git a/${path} b/${path}`,
+    ...(mode === "new" ? ["new file mode 100644", "--- /dev/null"] : [`--- a/${path}`]),
+    `+++ b/${path}`,
+    `@@ -0,0 +1,${added.length} @@`,
+    ...added.map((l) => `+${l}`),
+  ].join("\n");
+}

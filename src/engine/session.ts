@@ -34,8 +34,19 @@ export interface SessionState {
   blocks: number;
   /** Scripts this session wrote with risky commands in them (staged payloads), by resolved path. */
   scripts?: Record<string, FlaggedScript>;
+  /** Things a person approved in this session: approval id -> when. Covers the same thing again, never more. */
+  approved?: Record<string, string>;
+  /** Asks waiting for the agent app to run the action: tool call -> what to remember if it runs. */
+  pending?: Record<string, PendingAsk>;
+  /** The last action seen, to recognise the same call arriving twice (two hook files, one event). */
+  last?: { sig: string; at: number };
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PendingAsk {
+  items: { id: string; ruleId: string; target: string; label: string }[];
+  at: string;
 }
 
 export const newSession = (id: string, now = new Date()): SessionState => ({
@@ -52,10 +63,20 @@ export interface SessionSettings extends OutsideOptions {
   allowTestData: boolean;
 }
 
-type ToolKind = "command" | "read" | "search" | "write" | "fetch" | "other";
+type ToolKind = "command" | "read" | "search" | "write" | "delete" | "fetch" | "other";
 
 const str = (v: unknown) => (typeof v === "string" ? v : undefined);
-export const filePathOf = (input: Record<string, unknown>) => str(input.file_path) ?? str(input.notebook_path) ?? str(input.path);
+export const filePathOf = (input: Record<string, unknown>) =>
+  str(input.file_path) ?? str(input.notebook_path) ?? str(input.path) ?? str(input.filePath) ?? str(input.target_file) ?? str(input.absolute_path) ?? str(input.dir_path);
+
+/** Every file a tool call touches: one path, or several (a patch, a multi-file edit). */
+export function filePathsOf(input: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const one = filePathOf(input);
+  if (one) out.push(one);
+  if (Array.isArray(input.paths)) for (const p of input.paths) if (typeof p === "string" && !out.includes(p)) out.push(p);
+  return out;
+}
 
 /**
  * Agent-agnostic: decide what a tool does from its input shape, then its name. A file tool must
@@ -65,7 +86,8 @@ export function toolKind(tool: string, input: Record<string, unknown>): ToolKind
   const filePath = filePathOf(input);
   if (typeof input.command === "string") return "command";
   const name = tool.toLowerCase();
-  if (filePath && /write|edit|create|replace|apply_patch|insert/.test(name)) return "write";
+  if (filePath && /^(delete|remove|rm|unlink)/.test(name)) return "delete";
+  if (filePath && /write|edit|create|replace|apply_patch|insert|patch/.test(name)) return "write";
   if (filePath && /^(glob|grep|ls|list|search|find)|search_files|list_dir/.test(name)) return "search";
   if (filePath && /read|view|open|cat/.test(name)) return "read";
   if (typeof input.url === "string") return "fetch";
@@ -74,6 +96,9 @@ export function toolKind(tool: string, input: Record<string, unknown>): ToolKind
 
 const mcpServer = (tool: string) => /^mcp__([^_]+(?:_[^_]+)*?)__/.exec(tool)?.[1];
 const READ_ONLY_TOOLS = /^(read|glob|grep|ls|notebookread|todowrite|todoread|view|list_dir|search_files|read_file)$/i;
+
+/** Tools that only look at local files: what they are given never leaves the machine. */
+export const isLocalOnlyTool = (tool: string) => READ_ONLY_TOOLS.test(tool);
 
 /** Tools the circuit breaker still allows: they only look at local files. */
 export function isReadOnly(e: ActionEvent): boolean {
@@ -93,10 +118,11 @@ export function outsideAction(e: ActionEvent, findings: Finding[], ctx: PathCont
 
   const kind = toolKind(e.tool, e.input);
   if (kind === "command") return outsideCommand(String(e.input.command), ctx, s);
-  if (kind === "write") {
-    const p = filePathOf(e.input)!;
-    const where = classifyPath(p, ctx);
-    if (where === "outside" || where === "home" || where === "system" || where === "root") return { why: `writes outside the project (${p})` };
+  if (kind === "write" || kind === "delete") {
+    for (const p of filePathsOf(e.input)) {
+      const where = classifyPath(p, ctx);
+      if (where === "outside" || where === "home" || where === "system" || where === "root") return { why: `${kind === "delete" ? "deletes" : "writes"} outside the project (${p})` };
+    }
     return undefined;
   }
   if (kind === "fetch") {
@@ -159,10 +185,11 @@ export function nextSession(
   decision: Decision,
   legs: { A?: string; B?: string; script?: [string, FlaggedScript] },
   now = new Date(),
+  countBlock = true,
 ): SessionState {
   const at = now.toISOString();
   const next: SessionState = { ...state, legs: { ...state.legs }, updatedAt: at };
-  if (decision.action === "block") next.blocks += 1;
+  if (decision.action === "block" && countBlock) next.blocks += 1;
   // A blocked prompt never reached the model, so it adds nothing to the context.
   if (decision.action !== "block") {
     if (legs.A && !next.legs.A) next.legs.A = { at, why: legs.A };

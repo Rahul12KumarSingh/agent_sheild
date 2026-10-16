@@ -64,6 +64,9 @@ export function SourceTag({ r }: { r: ShieldRecord }) {
   if (r.demo) return <span className="tag tag-demo">demo data</span>;
   if (r.agent === "claude") return <span className="tag tag-real">Real Claude Code</span>;
   if (r.agent === "copilot") return <span className="tag tag-real">Real Copilot</span>;
+  if (r.agent === "cursor") return <span className="tag tag-real">Real Cursor</span>;
+  if (r.agent === "windsurf") return <span className="tag tag-real">Real Windsurf</span>;
+  if (r.agent === "gemini") return <span className="tag tag-real">Real Gemini CLI</span>;
   return <span className="tag">{r.agent}</span>;
 }
 
@@ -127,6 +130,7 @@ export function SplitView({ r, gemini }: { r: ShieldRecord; gemini?: boolean }) 
           <LevelPill level={r.level} score={r.score} />
         </div>
         {r.reason ? <p className="reason">{r.reason}</p> : <p className="muted">Nothing risky found. The agent's own permission rules stay in charge.</p>}
+        {r.approved ? <p className="muted small"><Icon name="check" size={12} /> Approved earlier in this session: asked once, then remembered. Blocks and the Rule of Two are never lifted by an approval.</p> : null}
         {r.findings.length ? (
           <ul className="rules">
             {r.findings.map((f, i) => (

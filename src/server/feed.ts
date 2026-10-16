@@ -8,7 +8,7 @@ import type { ShieldRecord } from "../hook/telemetry.js";
 const ACTIONS = new Set(["block", "ask", "note", "allow"]);
 const LEVELS = new Set(["SEVERE", "WARNING", "MILD", "CLEAN"]);
 const KINDS = new Set(["prompt", "action", "result"]);
-const CATEGORIES = new Set(["SECRET", "PII", "INJECT", "EXFIL", "DESTROY", "EXEC", "PRIV", "SUPPLY", "TAMPER", "SESSION"]);
+const CATEGORIES = new Set(["SECRET", "PII", "INJECT", "EXFIL", "DESTROY", "EXEC", "PRIV", "SUPPLY", "TAMPER", "SESSION", "GIT"]);
 
 export interface Counters {
   events: number;
@@ -89,7 +89,7 @@ export function sanitizeIncoming(body: unknown): ShieldRecord | undefined {
   return {
     id: randomUUID(),
     ts: new Date().toISOString(),
-    agent: /^(claude|copilot|cursor|scripted)$/.test(String(b.agent)) ? String(b.agent) : "unknown",
+    agent: /^(claude|copilot|cursor|windsurf|gemini|scripted)$/.test(String(b.agent)) ? String(b.agent) : "unknown",
     session: str(b.session, 16) ?? "unknown",
     kind: b.kind as ShieldRecord["kind"],
     ...(str(b.tool, 60) ? { tool: str(b.tool, 60) } : {}),
@@ -102,6 +102,7 @@ export function sanitizeIncoming(body: unknown): ShieldRecord | undefined {
     reason: str(b.reason, 400) ?? "",
     ...(str(b.safeAlternative, 400) ? { safeAlternative: str(b.safeAlternative, 400) } : {}),
     ...(ACTIONS.has(String(b.monitored)) ? { monitored: b.monitored as ShieldRecord["action"] } : {}),
+    ...(b.approved === true ? { approved: true } : {}),
     legs: {
       ...(str(legs.A, 160) ? { A: str(legs.A, 160) } : {}),
       ...(str(legs.B, 160) ? { B: str(legs.B, 160) } : {}),

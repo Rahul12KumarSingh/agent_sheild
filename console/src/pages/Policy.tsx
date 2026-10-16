@@ -9,9 +9,11 @@ const ALWAYS_ON = [
   "Deleting the home folder, root or a drive is blocked",
   "Downloaded scripts piped into a shell, and disguised commands, are blocked",
   "The Rule of Two: block or ask, never off",
-  "The agent cannot edit its own guardrails",
+  "The agent cannot edit, move or delete its own guardrails (hook settings, policy) in any agent app",
+  "Reading and searching the codebase is never held up. Secrets, keys and sensitive deletions ask a person",
+  "What is about to be committed is checked: live keys, secret files, changed hooks, risky CI lines, hidden text",
   "A redacted audit trail of every decision",
-  "Fail closed: if the shield breaks, it denies with an explanation",
+  "If the shield breaks it denies with an explanation, but a broken policy file never blocks everyday work",
 ];
 
 const LABELS: Record<string, string> = {
@@ -20,6 +22,7 @@ const LABELS: Record<string, string> = {
   mild_notes: "Small notes for MILD findings",
   coach_messages: "Show the safer alternative",
   outside_reads: "Reading files outside the project",
+  approvals: "Remember an approved ask",
   allow_test_data: "Known test data allowed",
   circuit_breaker: "Blocks before the session stops",
   allowed_hosts: "Allowed hosts",

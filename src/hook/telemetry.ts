@@ -23,6 +23,10 @@ export interface ShieldRecord {
   reason: string;
   safeAlternative?: string;
   monitored?: Action;
+  /** An earlier approval turned an ask into a note. */
+  approved?: boolean;
+  /** A policy file could not be loaded: the strict built-in rules decided. */
+  degraded?: boolean;
   legs: { A?: string; B?: string; C?: string };
   ruleOfTwo: boolean;
   profile?: string;
@@ -41,7 +45,7 @@ export function summarize(event: ShieldEvent): string {
   if (event.kind === "prompt") text = event.text;
   else {
     const i = event.input;
-    const main = i.command ?? i.file_path ?? i.notebook_path ?? i.path ?? i.url ?? i.query ?? i.pattern;
+    const main = i.command ?? i.file_path ?? i.notebook_path ?? i.path ?? i.filePath ?? i.url ?? i.query ?? i.pattern;
     text = typeof main === "string" ? main : JSON.stringify(i);
   }
   return clip(redactAll(text), 240);
@@ -65,6 +69,7 @@ export function toRecord(event: ShieldEvent, decision: Decision, extra: Partial<
     reason: clip(redactAll(decision.reason), 400),
     ...(decision.safeAlternative ? { safeAlternative: clip(redactAll(decision.safeAlternative), 400) } : {}),
     ...(decision.monitored ? { monitored: decision.monitored } : {}),
+    ...(decision.approved ? { approved: true } : {}),
     legs: { ...(s?.A ? { A: clip(redactAll(s.A), 160) } : {}), ...(s?.B ? { B: clip(redactAll(s.B), 160) } : {}), ...(s?.C ? { C: clip(redactAll(s.C), 160) } : {}) },
     ruleOfTwo: s?.ruleOfTwo ?? false,
     ...extra,

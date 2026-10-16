@@ -4,11 +4,14 @@ import { normalizeCommand } from "./normalize.js";
 import {
   classifyPath,
   isAuthorizedKeys,
+  isGuardrailOrParent,
   isGuardrailPath,
   isInstructionPath,
   isPersistencePath,
   isSecretPath,
+  isSensitiveToDelete,
   type PathContext,
+  pathTarget,
 } from "./paths.js";
 import type { Finding } from "./types.js";
 
@@ -226,9 +229,36 @@ const READ_VERBS = new Set([
   "select-string", "sls",
 ]);
 
-export function readsSecret(s: Segment, ctx: PathContext): string | undefined {
-  const candidates = READ_VERBS.has(s.cmd) ? [...s.positional, ...s.redirectsIn] : s.redirectsIn;
-  return candidates.find((p) => isSecretPath(p, ctx));
+/** Commands whose first argument is a pattern, filter or script, not a file: `rg "\.env|x" src`, `jq .a package.json`. */
+const PATTERN_FIRST = new Set(["grep", "egrep", "fgrep", "rg", "ag", "ack", "select-string", "sls", "findstr", "sed", "awk", "gawk", "jq", "yq"]);
+const PATTERN_FLAGS = /^(-e|-f|--regexp|--file|--expression)$/;
+
+export function readsSecrets(s: Segment, ctx: PathContext): string[] {
+  let files = READ_VERBS.has(s.cmd) ? [...s.positional] : [];
+  // The first non-flag argument of these is the thing to look for, not a file (unless -e/-f gave the pattern).
+  if (PATTERN_FIRST.has(s.cmd) && files.length > 0 && !s.args.some((a) => PATTERN_FLAGS.test(a))) files = files.slice(1);
+  return [...files, ...s.redirectsIn].filter((p) => isSecretPath(p, ctx));
+}
+
+export const readsSecret = (s: Segment, ctx: PathContext): string | undefined => readsSecrets(s, ctx)[0];
+
+/** Commands that narrow an environment dump to a few variables: `env | grep PATH` is not a secrets dump. */
+const NARROWERS = new Set(["grep", "egrep", "fgrep", "rg", "findstr", "select-string", "sls"]);
+const SECRETISH = /key|secret|token|pass|pwd|cred|auth|private|cert|aws|azure|gcp|google|api|ssh|login|session|cookie|bearer|\.\*|^\s*$/i;
+
+function envDumpNarrowed(text: string): boolean {
+  const pieces = text.split(/(?<!\|)\|(?!\|)/);
+  for (let i = 0; i < pieces.length - 1; i++) {
+    if (!parseSegments(pieces[i]!).some(isEnvDump)) continue;
+    const next = parseSegments(pieces[i + 1]!)[0];
+    if (!next) return false;
+    if (next.cmd === "wc") return true;
+    if (NARROWERS.has(next.cmd)) {
+      const pattern = next.positional[0] ?? "";
+      return pattern !== "" && !SECRETISH.test(pattern);
+    }
+  }
+  return false;
 }
 
 export function isEnvDump(s: Segment): boolean {
@@ -250,26 +280,118 @@ function isRecursiveFlag(cmd: string, a: string): boolean {
   return CMD_STYLE.has(cmd) && /^\/s$/i.test(a);
 }
 
-function deleteTargets(s: Segment): string[] | undefined {
+function deleteTargets(s: Segment, ctx: PathContext): string[] | undefined {
   if (RM_CMDS.has(s.cmd)) {
     if (!s.args.some((a) => isRecursiveFlag(s.cmd, a))) return undefined;
     return s.positional.filter((p) => !(CMD_STYLE.has(s.cmd) && /^\/[a-z]$/i.test(p)));
   }
-  if (s.cmd === "find" && (s.args.includes("-delete") || /-exec\s+rm\b/.test(s.text))) return s.positional.slice(0, 1);
+  if (s.cmd === "find" && (s.args.includes("-delete") || /-exec\s+rm\b/.test(s.text))) {
+    const root = s.positional.slice(0, 1);
+    // `find . -name "*.pyc" -delete` removes what matches, not the project: only the folder it starts in can make it dangerous.
+    const filtered = s.args.some((a) => /^-(i?name|i?path|i?regex|mtime|mmin|newer|size|empty|user)$/.test(a)) || s.args.some((a, i) => a === "-type" && s.args[i + 1] === "f");
+    return filtered && root.every((r) => !["root", "home", "system"].includes(classifyPath(r, ctx))) ? [] : root;
+  }
   return undefined;
 }
 
 // ---------- Writing ----------
 
 const MUTATE_VERBS = new Set([
-  "rm", "mv", "cp", "tee", "touch", "truncate", "ln", "chmod", "chown", "install", "move", "copy",
-  "set-content", "sc", "add-content", "ac", "out-file", "remove-item", "ri", "del", "erase", "move-item", "copy-item", "new-item", "ni",
+  "rm", "mv", "cp", "tee", "touch", "truncate", "ln", "chmod", "chown", "install", "move", "copy", "unlink", "rmdir", "shred", "rename", "sponge", "patch",
+  "set-content", "sc", "add-content", "ac", "out-file", "remove-item", "ri", "del", "erase", "move-item", "mi", "copy-item", "cpi", "new-item", "ni", "rd", "rename-item", "rni", "clear-content", "clc",
 ]);
+
+/** Verbs that make a file or folder disappear (or leave its place). */
+const REMOVE_VERBS = new Set(["rm", "mv", "unlink", "rmdir", "shred", "move", "remove-item", "ri", "del", "erase", "move-item", "mi", "rd", "rename", "rename-item", "rni"]);
+
+/** Files git changes behind your back: `git rm`, `git checkout -- f`, `git restore f`, `git clean`. */
+function gitTouchedPaths(s: Segment): { removed: string[]; written: string[] } {
+  const sub = s.positional[0];
+  const rest = s.positional.slice(1);
+  const dashes = s.args.indexOf("--");
+  const afterDashes = dashes >= 0 ? s.args.slice(dashes + 1).filter((a) => !a.startsWith("-")) : [];
+  switch (sub) {
+    case "rm":
+    case "mv":
+    case "clean":
+      return { removed: rest, written: [] };
+    case "restore":
+    case "checkout":
+    case "reset":
+      return { removed: [], written: dashes >= 0 ? afterDashes : rest };
+    case "stash":
+    case "switch":
+      return { removed: [], written: afterDashes };
+    default:
+      return { removed: [], written: [] };
+  }
+}
+
+function downloadTargets(s: Segment): string[] {
+  const a = s.args;
+  const out: string[] = [];
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    if (s.cmd === "curl") {
+      if (x === "-o" || x === "--output" || x === "--output-dir") out.push(a[++i] ?? "");
+      else if (/^-o./.test(x)) out.push(x.slice(2));
+      else if (/^--output=/.test(x)) out.push(x.slice(9));
+    } else if (s.cmd === "wget") {
+      if (x === "-O" || x === "--output-document" || x === "-P" || x === "--directory-prefix") out.push(a[++i] ?? "");
+      else if (/^-O./.test(x)) out.push(x.slice(2));
+      else if (/^--output-document=/.test(x)) out.push(x.slice(18));
+    } else if (["invoke-webrequest", "iwr", "invoke-restmethod", "irm"].includes(s.cmd)) {
+      if (/^-outfile$/i.test(x)) out.push(a[++i] ?? "");
+    } else if (s.cmd === "dd" && /^of=/.test(x)) out.push(x.slice(3));
+  }
+  return out.filter(Boolean);
+}
+
+/** Everything a segment deletes or moves away. */
+function removalTargets(s: Segment, ctx: PathContext): string[] {
+  const targets: string[] = [];
+  if (REMOVE_VERBS.has(s.cmd)) {
+    let p = s.positional.filter((x) => !(CMD_STYLE.has(s.cmd) && /^\/[a-z]$/i.test(x)));
+    // `mv a b` moves a away and writes b: only the sources count as removed.
+    if (MOVE_VERBS.has(s.cmd) && p.length > 1) p = p.slice(0, -1);
+    targets.push(...p);
+  }
+  if (s.cmd === "git") targets.push(...gitTouchedPaths(s).removed);
+  if (s.cmd === "find" && (s.args.includes("-delete") || /-exec\s+rm\b/.test(s.text))) {
+    targets.push(...s.positional.slice(0, 1));
+    // `find . -name ".env*" -delete`: the name filter says what is being deleted.
+    for (let i = 0; i < s.args.length - 1; i++) {
+      if (!/^-(i?name|i?path)$/.test(s.args[i]!)) continue;
+      const v = s.args[i + 1]!.replace(/^["']|["']$/g, "");
+      const secret = [v.replace(/\*+/g, ""), v.replace(/\*+/g, "x"), v.replace(/\*+$/, ".local").replace(/\*/g, "x")].find((c) => isSecretPath(c, ctx));
+      if (secret) targets.push(secret);
+    }
+  }
+  return targets;
+}
+
+const MOVE_VERBS = new Set(["mv", "move", "move-item", "mi", "rename", "rename-item", "rni"]);
+
+/** Git settings that make git run a program: setting one in a repository an agent works in is a way to run code later. */
+const GIT_EXEC_CONFIG = /^(core\.(fsmonitor|sshcommand|hookspath|editor|pager|gitproxy)|credential\..*helper|alias\..+|diff\..+\.(textconv|command)|filter\..+\.(clean|smudge|process)|merge\..+\.driver|url\..+\.insteadof|http\.proxy|include\.path|includeif\..+\.path)$/i;
+
+/** Commands that only look: naming a guardrail file in one of these is not an edit. */
+const READERS = new Set([
+  "cat", "less", "more", "head", "tail", "grep", "egrep", "fgrep", "rg", "ls", "dir", "stat", "file", "wc", "diff", "cmp", "bat", "type",
+  "get-content", "gc", "select-string", "sls", "jq", "yq", "find", "tree", "echo", "printf", "test", "realpath", "readlink", "basename",
+  "dirname", "sha256sum", "shasum", "md5sum", "du", "git", "gh", "code", "cd", "pwd", "which", "where", "command", "get-childitem", "gci",
+  "get-item", "gi", "get-filehash", "test-path", "resolve-path", "write-output", "write-host", "agentshield",
+]);
+
+const GUARDRAIL_MENTION =
+  /\.claude[\\/](?:settings(?:\.local)?\.json|plugins)|\.claude\.json|managed-settings\.json|\.cursor[\\/]hooks\.json|\.github[\\/](?:hooks|copilot[\\/]settings)|\.copilot[\\/](?:hooks|settings\.json|config\.json)|\.(?:windsurf|devin)[\\/]hooks\.json|\.codeium[\\/](?:windsurf[\\/])?hooks\.json|\.gemini[\\/]settings\.json|\.codex[\\/](?:hooks\.json|config\.toml)|\.agentshield\b/i;
 
 function writeTargets(s: Segment): string[] {
   const targets = [...s.redirectsOut];
   if (MUTATE_VERBS.has(s.cmd)) targets.push(...s.positional);
   if ((s.cmd === "sed" || s.cmd === "perl") && s.args.some((a) => /^-i/.test(a))) targets.push(...s.positional.slice(1));
+  targets.push(...downloadTargets(s));
+  if (s.cmd === "git") targets.push(...gitTouchedPaths(s).written);
   return targets;
 }
 
@@ -293,16 +415,16 @@ function analyzeVariant(text: string, ctx: PathContext, excerpt: string, allowed
   for (const s of segs) {
     // The agent loosening its own settings through our CLI is tampering, like editing the files directly.
     if ((s.cmd === "agentshield" || (s.cmd === "node" && /agentshield|cli\.js/i.test(s.positional[0] ?? ""))) &&
-        /\bconfig\s+set\b|\binit\b.*--remove|\buninstall\b/i.test(s.args.join(" "))) {
+        /\bconfig\s+set\b|\binit\b|\ballow\b|\bapprovals?\s+(?:revoke|clear|remove)\b|\buninstall\b|\bsetup\b/i.test(s.args.join(" "))) {
       out.push(hit("TAM-001", "agentshield settings", excerpt));
     }
 
     // Deleting
-    const targets = deleteTargets(s);
+    const targets = deleteTargets(s, ctx);
     for (const t of targets ?? []) {
       const where = classifyPath(t, ctx);
       if (where === "root" || where === "home" || where === "system") out.push(hit("DES-001", t, excerpt));
-      else if (where === "outside" || where === "project-root") out.push(hit("DES-002", t, excerpt));
+      else if (where === "outside" || where === "project-root") out.push(hit("DES-002", t, excerpt, undefined, pathTarget(t, ctx)));
       else if (where === "project") out.push(hit("DES-003", t, excerpt));
     }
     if (/^mkfs/.test(s.cmd) || s.cmd === "diskpart" || s.cmd === "format-volume" || s.cmd === "clear-disk" ||
@@ -318,9 +440,8 @@ function analyzeVariant(text: string, ctx: PathContext, excerpt: string, allowed
     }
 
     // Secrets
-    const secret = readsSecret(s, ctx);
-    if (secret) out.push(hit("SEC-004", secret, excerpt));
-    if (isEnvDump(s)) out.push(hit("SEC-005", undefined, excerpt));
+    for (const secret of readsSecrets(s, ctx)) out.push(hit("SEC-004", secret, excerpt, undefined, pathTarget(secret, ctx)));
+    if (isEnvDump(s) && !envDumpNarrowed(text)) out.push(hit("SEC-005", undefined, excerpt, undefined, "environment"));
 
     // Network uploads
     if (isNet(s)) {
@@ -339,7 +460,9 @@ function analyzeVariant(text: string, ctx: PathContext, excerpt: string, allowed
       out.push(hit("PRV-001", undefined, excerpt));
     }
     const joined = s.args.join(" ").toLowerCase();
-    if ((s.cmd === "crontab" && !(s.args.length === 1 && s.args[0] === "-l")) ||
+    const gitExecConfig = s.cmd === "git" && s.positional[0] === "config" && GIT_EXEC_CONFIG.test(s.positional[1] ?? "") && (s.positional.length >= 3 || s.args.some((a) => /^--(add|replace-all)$/.test(a)));
+    if (gitExecConfig ||
+        (s.cmd === "crontab" && !(s.args.length === 1 && s.args[0] === "-l")) ||
         (s.cmd === "launchctl" && /\b(load|bootstrap|submit|enable)\b/.test(joined)) ||
         (s.cmd === "systemctl" && /\benable\b/.test(joined)) ||
         (s.cmd === "schtasks" && /\/create\b/.test(joined)) ||
@@ -348,13 +471,22 @@ function analyzeVariant(text: string, ctx: PathContext, excerpt: string, allowed
       out.push(hit("PER-001", undefined, excerpt));
     }
 
-    // Writes to protected places
-    for (const t of writeTargets(s)) {
-      if (isGuardrailPath(t, ctx)) out.push(hit("TAM-001", t, excerpt));
-      else if (isAuthorizedKeys(t, ctx)) out.push(hit("PER-002", t, excerpt));
-      else if (isInstructionPath(t, ctx)) out.push(hit("TAM-002", t, excerpt));
-      else if (isPersistencePath(t, ctx)) out.push(hit("PER-001", t, excerpt));
+    // Deleting or moving away sensitive things, and writing to protected places
+    const removed = removalTargets(s, ctx);
+    for (const t of removed) {
+      if (isGuardrailOrParent(t, ctx)) out.push(hit("TAM-001", t, excerpt, undefined, pathTarget(t, ctx)));
+      else if (isSensitiveToDelete(t, ctx)) out.push(hit("DES-010", t, excerpt, undefined, pathTarget(t, ctx)));
     }
+    const written = writeTargets(s);
+    for (const t of written) {
+      if (isGuardrailPath(t, ctx)) out.push(hit("TAM-001", t, excerpt, undefined, pathTarget(t, ctx)));
+      else if (isAuthorizedKeys(t, ctx)) out.push(hit("PER-002", t, excerpt, undefined, pathTarget(t, ctx)));
+      else if (isInstructionPath(t, ctx)) out.push(hit("TAM-002", t, excerpt, undefined, pathTarget(t, ctx)));
+      else if (isPersistencePath(t, ctx)) out.push(hit("PER-001", t, excerpt, undefined, pathTarget(t, ctx)));
+    }
+    // A script or tool we cannot read the effect of must not touch the guardrails unseen.
+    const mention = s.cmd && removed.length === 0 && written.length === 0 && !READERS.has(s.cmd) ? GUARDRAIL_MENTION.exec(s.text) : null;
+    if (mention) out.push(hit("TAM-003", clip(s.text, 80), excerpt, undefined, mention[0].toLowerCase().replace(/\\/g, "/")));
 
     // Supply chain
     if (["npm", "pnpm", "yarn", "bun", "pip", "pip3", "uv", "pipx"].includes(s.cmd) &&
@@ -516,4 +648,29 @@ export function commandFindingsInContent(content: string, ctx: PathContext): Fin
     found.push(...analyzeCommand(line, ctx).findings.filter((f) => f.level !== "MILD"));
   }
   return dedupe(found);
+}
+
+/** What a git command is about to commit or publish: the staged changes, the whole working tree, or unpushed commits. */
+export type GitGate = "staged" | "worktree" | "outgoing";
+
+/** Which changes the hook should show the engine for this command. Empty for commands that publish nothing. */
+export function gitGates(command: string): GitGate[] {
+  const gates = new Set<GitGate>();
+  let adds = false;
+  for (const variant of normalizeCommand(command).variants) {
+    for (const s of parseSegments(variant)) {
+      if (s.cmd === "git") {
+        const sub = s.positional[0];
+        if (sub === "add") adds = true;
+        if (sub === "commit" && !s.args.includes("--dry-run")) gates.add(s.args.some((a) => a === "--all" || /^-[a-zA-Z]*a[a-zA-Z]*$/.test(a)) ? "worktree" : "staged");
+        if (sub === "push" && !s.args.includes("--dry-run") && !s.args.includes("-n")) gates.add("outgoing");
+      } else if (s.cmd === "gh" && s.positional[0] === "pr" && s.positional[1] === "create") gates.add("outgoing");
+    }
+  }
+  // `git add -A && git commit` stages in the same command: the hook sees the tree before it is staged.
+  if (adds && gates.has("staged")) {
+    gates.delete("staged");
+    gates.add("worktree");
+  }
+  return [...gates];
 }

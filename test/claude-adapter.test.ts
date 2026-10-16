@@ -19,7 +19,7 @@ const post = (tool: string, response: unknown) =>
   JSON.stringify({ session_id: "s1", cwd: "/home/dev/project", hook_event_name: "PostToolUse", tool_name: tool, tool_input: {}, tool_response: response });
 
 function run(raw: string, headless = false) {
-  const event = parseClaude(raw, headless);
+  const event = parseClaude(raw, headless)!;
   return formatClaude(evaluate(event, POSIX), event);
 }
 
@@ -30,8 +30,9 @@ describe("Claude Code adapter", () => {
     expect(parseClaude(post("Read", "x"), false)).toMatchObject({ kind: "result", tool: "Read", output: "x" });
   });
 
-  it("rejects unknown events so the hook fails closed", () => {
-    expect(() => parseClaude(JSON.stringify({ hook_event_name: "Nope" }), false)).toThrow();
+  it("ignores events it does not judge (session start, stop) and rejects what it cannot read", () => {
+    expect(parseClaude(JSON.stringify({ hook_event_name: "SessionStart" }), false)).toBeNull();
+    expect(parseClaude(JSON.stringify({ hook_event_name: "Nope" }), false)).toBeNull();
     expect(() => parseClaude("not json", false)).toThrow();
   });
 

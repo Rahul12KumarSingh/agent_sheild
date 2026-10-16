@@ -2,88 +2,76 @@
 // Reference: https://code.claude.com/docs/en/hooks
 
 import type { Decision, ShieldEvent } from "../engine/types.js";
+import { askMessage, denyMessage, needsApprovalMessage, noteMessage, outcomeOf } from "./common.js";
+import { canonicalize } from "./tools.js";
+import type { Adapter, FormatOptions, HookOutput } from "./types.js";
 
-export interface HookOutput {
-  exitCode: number;
-  stdout?: string;
-  stderr?: string;
+export type { Adapter, FormatOptions, HookOutput } from "./types.js";
+
+const PASCAL_EVENTS = new Set(["UserPromptSubmit", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SessionStart", "SessionEnd", "Stop", "SubagentStop", "PreCompact", "Notification", "PermissionRequest"]);
+
+const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : undefined);
+
+/** Claude Code's payloads: PascalCase event names, no timestamp. (Copilot and VS Code add one.) */
+export function detectClaude(input: Record<string, unknown>): boolean {
+  return PASCAL_EVENTS.has(String(input.hook_event_name)) && input.timestamp === undefined && input.conversation_id === undefined;
 }
 
-export interface FormatOptions {
-  /** When the safer alternative is shown: always, only on a block, or never (an action block still tells the model). */
-  coach?: "always" | "on_block" | "off";
-}
-
-/** One adapter per agent app: its hook format in, its hook format out. The engine never changes. */
-export interface Adapter {
-  parse(raw: string, headless: boolean): ShieldEvent;
-  format(decision: Decision, event: ShieldEvent, opts?: FormatOptions): HookOutput;
-}
-
-interface ClaudeHookInput {
-  session_id?: string;
-  cwd?: string;
-  hook_event_name?: string;
-  prompt?: string;
-  tool_name?: string;
-  tool_input?: Record<string, unknown>;
-  tool_response?: unknown;
-}
-
-export function parseClaude(raw: string, headless: boolean): ShieldEvent {
-  const input = JSON.parse(raw) as ClaudeHookInput;
+export function parseClaudeInput(input: Record<string, unknown>, headless: boolean): ShieldEvent | null {
   const base = {
     agent: "claude" as const,
-    sessionId: input.session_id ?? "unknown",
-    cwd: input.cwd ?? process.cwd(),
+    sessionId: text(input.session_id) ?? "unknown",
+    cwd: text(input.cwd) ?? process.cwd(),
     headless,
+    surface: String(input.hook_event_name),
   };
 
   switch (input.hook_event_name) {
     case "UserPromptSubmit":
-      return { ...base, kind: "prompt", text: input.prompt ?? "" };
-    case "PreToolUse":
-      return { ...base, kind: "action", tool: input.tool_name ?? "", input: input.tool_input ?? {} };
-    case "PostToolUse":
-      return {
-        ...base,
-        kind: "result",
-        tool: input.tool_name ?? "",
-        input: input.tool_input ?? {},
-        output: input.tool_response,
-      };
+      return { ...base, kind: "prompt", text: text(input.prompt) ?? "" };
+    case "PreToolUse": {
+      const c = canonicalize(String(input.tool_name ?? ""), input.tool_input);
+      return { ...base, kind: "action", tool: c.tool, input: c.input, ...(c.rawTool ? { rawTool: c.rawTool } : {}), ...(text(input.tool_use_id) ? { toolUseId: String(input.tool_use_id) } : {}) };
+    }
+    case "PostToolUse": {
+      const c = canonicalize(String(input.tool_name ?? ""), input.tool_input);
+      return { ...base, kind: "result", tool: c.tool, input: c.input, output: input.tool_response, ...(c.rawTool ? { rawTool: c.rawTool } : {}), ...(text(input.tool_use_id) ? { toolUseId: String(input.tool_use_id) } : {}) };
+    }
     default:
-      throw new Error(`Unsupported Claude Code hook event: ${String(input.hook_event_name)}`);
+      // Session start, stop, compaction ...: nothing for us to judge.
+      return null;
   }
+}
+
+/** The raw-string entry point used by tests and the capture tooling. Invalid JSON throws. */
+export function parseClaude(raw: string, headless: boolean): ShieldEvent | null {
+  return parseClaudeInput(JSON.parse(raw) as Record<string, unknown>, headless);
 }
 
 export function formatClaude(decision: Decision, event: ShieldEvent, opts: FormatOptions = {}): HookOutput {
   const coach = opts.coach ?? "always";
-  const ask = decision.action === "ask" && !event.headless;
-  const block = decision.action === "block" || (decision.action === "ask" && event.headless);
+  const outcome = outcomeOf(decision, event, event.kind === "action");
 
-  if (block) {
+  if (outcome === "block") {
     // Exit code 2 denies in Claude Code, Copilot CLI and Cursor. For a prompt, stderr is shown to the user;
     // for a tool call, it goes to the model, which usually takes the safe alternative.
     return { exitCode: 2, stderr: denyMessage(decision, event, coach) };
   }
 
-  if (ask && event.kind === "action") {
-    const tip = coach === "always" && decision.safeAlternative ? ` Safer option: ${decision.safeAlternative}` : "";
-    return {
-      exitCode: 0,
-      stdout: JSON.stringify({
-        hookSpecificOutput: {
-          hookEventName: "PreToolUse",
-          permissionDecision: "ask",
-          permissionDecisionReason: `AgentShield: ${decision.reason}.${tip}`,
-        },
-      }),
-    };
+  if (outcome === "ask" || outcome === "needs-approval") {
+    if (event.kind === "action") {
+      return {
+        exitCode: 0,
+        stdout: JSON.stringify({
+          hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "ask", permissionDecisionReason: askMessage(decision, opts) },
+        }),
+      };
+    }
+    return { exitCode: 2, stderr: needsApprovalMessage(decision, event, opts) };
   }
 
   // A note on a prompt or a tool result goes to the model as extra context (e.g. "treat this page as data").
-  if (decision.action === "note" && event.kind !== "action" && decision.findings.length > 0) {
+  if (outcome === "note" && event.kind !== "action" && decision.findings.length > 0) {
     return {
       exitCode: 0,
       stdout: JSON.stringify({
@@ -98,22 +86,9 @@ export function formatClaude(decision: Decision, event: ShieldEvent, opts: Forma
   return { exitCode: 0 };
 }
 
-function noteMessage(decision: Decision, event: ShieldEvent, coach: FormatOptions["coach"]): string {
-  const rules = decision.findings.map((f) => f.ruleId).join(", ");
-  const subject = event.kind === "result" ? `The output of ${event.tool}` : "The user's prompt";
-  // Results carry the quarantine instruction ("treat this content as data"): always keep it.
-  const tip = coach === "always" || event.kind === "result" ? (decision.safeAlternative ?? "") : "";
-  return `AgentShield note [${decision.level} ${rules}]: ${subject}: ${decision.reason}. ${tip}`.trim();
-}
-
-function denyMessage(decision: Decision, event: ShieldEvent, coach: FormatOptions["coach"]): string {
-  const rules = decision.findings.map((f) => f.ruleId).join(", ");
-  const lines = [`AgentShield blocked this ${event.kind === "prompt" ? "prompt" : "action"} [${decision.level} ${decision.score}${rules ? ` ${rules}` : ""}]: ${decision.reason}`];
-  if (decision.safeAlternative && (event.kind !== "prompt" || coach !== "off")) {
-    lines.push(event.kind === "prompt" ? `Safer prompt: ${decision.safeAlternative}` : `Safe alternative: ${decision.safeAlternative}`);
-  }
-  if (event.kind !== "prompt") lines.push("Do not retry this action in another form.");
-  return lines.join("\n");
-}
-
-export const claude: Adapter = { parse: parseClaude, format: formatClaude };
+export const claude: Adapter = {
+  id: "claude",
+  detect: detectClaude,
+  parse: parseClaudeInput,
+  format: formatClaude,
+};
