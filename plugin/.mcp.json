@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "agentshield": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "mcp"]
+    }
+  }
+}

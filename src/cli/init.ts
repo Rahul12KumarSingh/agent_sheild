@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import type { HookOutput } from "../adapters/claude.js";
@@ -87,7 +87,8 @@ export function initCommand(args: string[], opts: { cwd: string; cli: string }):
   const user = args.includes("--user");
   const remove = args.includes("--remove");
   const agent = args.includes("--agent") ? args[args.indexOf("--agent") + 1] : "claude";
-  if (agent !== "claude") return { exitCode: 1, stderr: `init supports: claude. For Copilot, see the README (Copilot hooks).` };
+  if (agent === "copilot") return initCopilot({ user, remove, cwd: opts.cwd, cli: cliPath(opts.cli) });
+  if (agent !== "claude") return { exitCode: 1, stderr: `init supports --agent claude (default) and --agent copilot.` };
 
   const path = settingsPath({ user, cwd: opts.cwd });
   let settings: Settings;
@@ -104,4 +105,32 @@ export function initCommand(args: string[], opts: { cwd: string; cli: string }):
     ? "AgentShield hooks removed."
     : "Restart Claude Code (or open /hooks) so it picks up the change, then run `agentshield doctor`.";
   return { exitCode: 0, stdout: `${path}:\n  ${changes.join("\n  ")}\n${tail}` };
+}
+
+// ---------- GitHub Copilot (CLI, cloud agent, VS Code) ----------
+
+export const COPILOT_EVENTS = ["userPromptSubmitted", "preToolUse", "postToolUse"] as const;
+
+/** One file of our own, so other hook files are never touched. `command` works in bash and PowerShell. */
+export function copilotHooks(cli: string) {
+  const entry = { type: "command", command: `node "${cli}" hook copilot`, timeoutSec: 30 };
+  return { version: 1, hooks: Object.fromEntries(COPILOT_EVENTS.map((e) => [e, [entry]])) };
+}
+
+function initCopilot(o: { user: boolean; remove: boolean; cwd: string; cli: string; home?: string }): HookOutput {
+  const dir = o.user ? join(o.home ?? homedir(), ".copilot", "hooks") : join(o.cwd, ".github", "hooks");
+  const path = join(dir, "agentshield.json");
+  if (o.remove) {
+    if (!existsSync(path)) return { exitCode: 0, stdout: `${path}: nothing to remove.` };
+    rmSync(path);
+    return { exitCode: 0, stdout: `${path}: removed.` };
+  }
+  const next = `${JSON.stringify(copilotHooks(o.cli), null, 2)}\n`;
+  if (existsSync(path) && readFileSync(path, "utf8") === next) return { exitCode: 0, stdout: `${path}: already up to date.` };
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path, next);
+  return {
+    exitCode: 0,
+    stdout: `${path}: AgentShield hooks for userPromptSubmitted, preToolUse, postToolUse.\nCopilot can deny actions (fail closed on a crash) but cannot block prompts; prompts are recorded only.`,
+  };
 }

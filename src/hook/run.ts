@@ -1,4 +1,5 @@
 import { type Adapter, claude, type HookOutput } from "../adapters/claude.js";
+import { copilot } from "../adapters/copilot.js";
 import { capturePayload } from "../cli/capture.js";
 import { decide, defaultContext, type EngineContext } from "../engine/index.js";
 import type { Decision, ShieldEvent } from "../engine/types.js";
@@ -6,7 +7,7 @@ import { type EffectivePolicy, loadPolicyAsync, userDir } from "../policy/index.
 import { gitRemoteUrl, loadSession, saveSession } from "./state.js";
 import { appendLocalLog, type ShieldRecord, sendToConsole, toRecord } from "./telemetry.js";
 
-export const ADAPTERS: Record<string, Adapter> = { claude };
+export const ADAPTERS: Record<string, Adapter> = { claude, copilot };
 
 export interface HookRunOptions {
   agent: string;

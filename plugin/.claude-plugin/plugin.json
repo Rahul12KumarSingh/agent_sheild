@@ -1,0 +1,9 @@
+{
+  "name": "agentshield",
+  "displayName": "AgentShield",
+  "version": "0.9.0",
+  "description": "A policy checkpoint for AI coding agents: checks every prompt and action, blocks secret leaks and destroyed folders, applies the Rule of Two, and offers a safe alternative.",
+  "author": { "name": "AgentShield team" },
+  "license": "MIT",
+  "keywords": ["security", "prompt-injection", "secrets", "policy", "guardrails"]
+}

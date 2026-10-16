@@ -12,7 +12,7 @@
     "agentshield": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsup && vite build --config console/vite.config.ts --logLevel warn",
+    "build": "tsup && vite build --config console/vite.config.ts --logLevel warn && node scripts/build-plugin.mjs",
     "build:server": "tsup",
     "dev:server": "tsup --watch --onSuccess \"node dist/server.js\"",
     "dev:console": "vite --config console/vite.config.ts",

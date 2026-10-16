@@ -95,6 +95,8 @@ export function isGuardrailPath(raw: string, ctx: PathContext): boolean {
     /\/\.claude\/settings(\.local)?\.json$/.test(p) ||
     /\/managed-settings\.json$/.test(p) ||
     /\/\.agentshield(\/|$)/.test(p) ||
+    /\/\.claude\/plugins\/.*agentshield/.test(p) ||
+    /\/plugin\/runtime\/agentshield\.js$/.test(p) ||
     /\/\.cursor\/hooks\.json$/.test(p) ||
     /\/\.github\/hooks(\/|$)/.test(p) ||
     /\/\.copilot\/hooks(\/|$)/.test(p)

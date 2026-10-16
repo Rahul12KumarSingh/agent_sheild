@@ -1,12 +1,13 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import type { HookOutput } from "../adapters/claude.js";
-import { evaluate } from "../engine/index.js";
 import { runHook } from "../hook/run.js";
 import { loadPolicyAsync } from "../policy/index.js";
+import { checkText, describeCheck } from "./check.js";
 import { configCommand } from "./config.js";
 import { doctorCommand } from "./doctor.js";
 import { initCommand } from "./init.js";
+import { runMcp } from "./mcp.js";
 
 const VERSION = "0.9.0";
 const CLI = fileURLToPath(import.meta.url);
@@ -14,15 +15,17 @@ const CLI = fileURLToPath(import.meta.url);
 const USAGE = `agentshield ${VERSION}: a policy checkpoint for AI coding agents
 
 Usage:
-  agentshield init [--user] [--remove]   Add the hooks to Claude Code (.claude/settings.json, or ~/.claude with --user)
+  agentshield init [--agent claude|copilot] [--user] [--remove]
+                                         Add the hooks (Claude Code: .claude/settings.json; Copilot: .github/hooks/)
   agentshield doctor                     Check the setup: hooks, policy, session folder, Claude Code, console
   agentshield check [--json] [--profile <name>] <text>
                                          Score a prompt or command, print level, rules, reason and safe alternative
   agentshield config show|explain|set|path
                                          Read or change settings. Company rules cannot be loosened
   agentshield serve [--port 8080]        Run the console locally
+  agentshield mcp                        MCP server (stdio) with check_prompt and check_command, advice only
   agentshield hook <agent> [--capture <dir>]
-                                         Called by the agent app's hooks (JSON on stdin). Agents: claude
+                                         Called by the agent app's hooks (JSON on stdin). Agents: claude, copilot
   agentshield --version
 `;
 
@@ -49,17 +52,9 @@ async function runCheck(args: string[]): Promise<HookOutput> {
   } catch (err) {
     return { exitCode: 1, stderr: `AgentShield policy could not be loaded: ${err instanceof Error ? err.message : String(err)}` };
   }
-  const base = { agent: "scripted" as const, sessionId: "check", cwd: process.cwd(), headless: false };
-  const asCommand = evaluate({ ...base, kind: "action", tool: "Bash", input: { command: text } }, undefined, { policy });
-  const asPrompt = evaluate({ ...base, kind: "prompt", text }, undefined, { policy });
-  // On a tie prefer the prompt view: it carries the safer rewrite.
-  const [as, decision] = asPrompt.score > 0 && asPrompt.score >= asCommand.score ? ["prompt", asPrompt] : ["command", asCommand];
-
+  const { as, decision } = checkText(text, policy, process.cwd());
   if (json) return { exitCode: 0, stdout: JSON.stringify({ as, profile: policy.profile, ...decision }, null, 2) };
-  const lines = [`${decision.level} (score ${decision.score}) as a ${as}: ${decision.action.toUpperCase()}${decision.monitored ? ` (monitor mode, would ${decision.monitored})` : ""}   [profile ${policy.profile}]`];
-  for (const f of decision.findings) lines.push(`  ${f.ruleId} [${f.category} ${f.level}] ${f.reason}`);
-  if (decision.safeAlternative && decision.level !== "CLEAN") lines.push(`${as === "prompt" ? "Safer prompt" : "Safe alternative"}: ${decision.safeAlternative}`);
-  return { exitCode: 0, stdout: lines.join("\n") };
+  return { exitCode: 0, stdout: describeCheck(as, decision, policy.profile) };
 }
 
 async function serve(args: string[]): Promise<HookOutput> {
@@ -88,6 +83,9 @@ async function main(argv: string[]): Promise<HookOutput> {
       return doctorCommand({ cwd: process.cwd(), env: process.env, cli: CLI });
     case "serve":
       return serve(rest);
+    case "mcp":
+      await runMcp({ cwd: process.cwd(), env: process.env, version: VERSION });
+      return { exitCode: 0 };
     case "--version":
     case "-v":
       return { exitCode: 0, stdout: VERSION };

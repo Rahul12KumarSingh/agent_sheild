@@ -64,7 +64,7 @@ interface Ctx {
 }
 
 function writtenContent(input: Record<string, unknown>): string {
-  const parts = [input.content, input.new_string, input.new_source, input.new_str, input.text];
+  const parts = [input.content, input.new_string, input.new_source, input.new_str, input.file_text, input.text];
   if (Array.isArray(input.edits)) for (const e of input.edits) parts.push((e as Record<string, unknown>)?.new_string);
   return parts.filter((p): p is string => typeof p === "string").join("\n");
 }

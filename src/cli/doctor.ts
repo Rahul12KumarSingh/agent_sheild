@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type { HookOutput } from "../adapters/claude.js";
 import { evaluate } from "../engine/index.js";
@@ -67,7 +68,18 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
       }
     }
   }
-  if (installed === 0) add("fail", "AgentShield hooks are not installed for Claude Code here. Run `agentshield init` (this project) or `agentshield init --user`");
+  const copilotFiles = [join(opts.cwd, ".github", "hooks", "agentshield.json"), join(homedir(), ".copilot", "hooks", "agentshield.json")].filter((p) => existsSync(p));
+  for (const p of copilotFiles) {
+    const text = readFileSync(p, "utf8");
+    const target = /node "([^"]+)" hook copilot/.exec(text)?.[1];
+    if (target && !existsSync(target)) add("fail", `${p} points at ${target}, which does not exist (run agentshield init --agent copilot)`);
+    else add("ok", `${p}: AgentShield hooks for GitHub Copilot`);
+  }
+  if (installed === 0 && copilotFiles.length === 0) {
+    add("fail", "AgentShield hooks are not installed here. Run `agentshield init` (Claude Code), `agentshield init --agent copilot`, or install the plugin");
+  } else if (installed === 0) {
+    add("warn", "No Claude Code hooks in settings files (fine if you only use Copilot, or installed the AgentShield plugin)");
+  }
 
   // Policy
   try {

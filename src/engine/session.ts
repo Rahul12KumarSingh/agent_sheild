@@ -105,7 +105,7 @@ export function outsideAction(e: ActionEvent, findings: Finding[], ctx: PathCont
     return undefined;
   }
   const server = mcpServer(e.tool);
-  if (kind === "other" && server && server !== "agentshield" && OUTWARD_MCP.test(e.tool.slice(e.tool.lastIndexOf("__") + 2))) {
+  if (kind === "other" && server && !s.trustedMcpServers.includes(server) && OUTWARD_MCP.test(e.tool.slice(e.tool.lastIndexOf("__") + 2))) {
     return { why: `${e.tool} sends data through MCP server ${server}` };
   }
   return undefined;

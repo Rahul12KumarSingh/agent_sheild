@@ -33,7 +33,7 @@ export const BUILTIN: PolicyFile = {
     "developer.mozilla.org", "docs.python.org", "learn.microsoft.com", "docs.github.com",
   ],
   allowed_remotes: [],
-  trusted_mcp_servers: ["agentshield"],
+  trusted_mcp_servers: ["agentshield", "plugin_agentshield_agentshield"],
   protected_paths: [],
   extra_ask_commands: [],
   pii: ["card", "aadhaar", "pan", "email"],
