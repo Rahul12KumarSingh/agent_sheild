@@ -42,8 +42,13 @@ export function formatAntigravity(decision: Decision, event: ShieldEvent, opts: 
   if (event.kind === "prompt") return { exitCode: 0 };
   const say = (verdict: string, reason?: string): HookOutput => ({ exitCode: 0, stdout: JSON.stringify({ decision: verdict, ...(reason ? { reason } : {}) }) });
   if (outcome === "block") return say("deny", denyMessage(decision, event, opts.coach));
-  // force_ask always prompts: a cached "Always allow" must not skip a question AgentShield asked on purpose.
-  if (outcome === "ask" || outcome === "needs-approval") return say("force_ask", askMessage(decision, opts));
+  // A plain "ask" follows the app's own memory: Allow once asks again, Always allow stops asking. A question that must be
+  // asked every time (a private key, the Rule of Two) is force_ask, which ignores a cached Always allow.
+  if (outcome === "ask" || outcome === "needs-approval") {
+    const asks = decision.asks ?? [];
+    const appMayRemember = asks.length > 0 && asks.every((a) => a.rememberable);
+    return say(appMayRemember ? "ask" : "force_ask", askMessage(decision, { ...opts, approvals: false }));
+  }
   // "allow" hands the call on to the app's own permission rules: AgentShield never approves.
   return say("allow");
 }

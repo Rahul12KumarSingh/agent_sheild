@@ -80,25 +80,31 @@ describe("Antigravity CLI: what AgentShield answers (JSON on stdout, exit 0)", (
     expect((await pre("run_command", { CommandLine: "rm -rf .agents", Cwd: POSIX_CWD })).said.decision).toBe("deny");
   });
 
-  it("asks with force_ask, so a cached Always allow cannot skip the question", async () => {
+  it("asks with a plain ask, so the app's own Allow once / Always allow decides how often", async () => {
     for (const [name, args] of [
       ["view_file", { AbsolutePath: `${POSIX_CWD}/.env` }],
       ["run_command", { CommandLine: "cat .env", Cwd: POSIX_CWD }],
       ["grep_search", { SearchPath: POSIX_CWD, Query: "KEY", Includes: ["**/.env*"] }],
     ] as const) {
       const { said } = await pre(name, args);
-      expect(said.decision, name).toBe("force_ask");
+      expect(said.decision, name).toBe("ask");
       expect(said.reason, name).toContain("SEC-004");
+      expect(said.reason, name).not.toContain("will not ask again");
     }
   });
 
-  it("remembers a yes: the PostToolUse hook (told its event by the hook entry) turns the next ask into a note", async () => {
-    const session = `ag-yes-${n++}`;
+  it("a question that must be asked every time is force_ask, which ignores a cached Always allow", async () => {
+    const { said } = await pre("view_file", { AbsolutePath: "/home/dev/.ssh/id_ed25519" });
+    expect(said.decision).toBe("force_ask");
+  });
+
+  it("Allow once stays once: AgentShield does not turn a yes into a standing approval", async () => {
+    const session = `ag-once-${n++}`;
     const args = { AbsolutePath: `${POSIX_CWD}/.env` };
-    expect((await pre("view_file", args, session)).said.decision).toBe("force_ask");
+    expect((await pre("view_file", args, session)).said.decision).toBe("ask");
     const done = await post("view_file", args, session);
     expect(done.output).toEqual({ exitCode: 0, stdout: "{}" });
-    expect((await pre("view_file", args, session)).said.decision).toBe("allow");
+    expect((await pre("view_file", args, session)).said.decision).toBe("ask");
   });
 
   it("the Rule of Two works without seeing results: a fetched page, a secret read, then an upload", async () => {

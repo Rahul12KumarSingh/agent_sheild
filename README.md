@@ -78,7 +78,7 @@ node /path/to/agentshield/dist/cli.js doctor            # runs every hook the wa
 | Cursor | `.cursor/hooks.json` (it can also read `.claude/settings.json`) | Block prompts, shell, MCP, file edits and reads. Asks on shell and MCP; an ask on a read or an edit becomes a deny that carries the `agentshield allow` command to run |
 | Windsurf (Devin Desktop) | `.windsurf/hooks.json` or `.devin/hooks.json` | Block prompts, shell, reads, edits and MCP. It cannot ask, so an ask is a deny that carries the `agentshield allow` command |
 | Gemini CLI | `.gemini/settings.json` | Block prompts and tool calls. It cannot ask: same as Windsurf |
-| Antigravity CLI (Gemini CLI's successor) | `.agents/hooks.json` | Block and ask on tool calls, with a question that a cached "Always allow" cannot skip. It has no prompt hook and its hooks never see tool results, so prompts are not scanned and text hidden in a result is not quarantined (the Rule of Two still follows what was fetched and read) |
+| Antigravity CLI (Gemini CLI's successor) | `.agents/hooks.json` | Block and ask on tool calls. The app's own buttons decide how often it asks: Allow once asks again next time, Always allow stops the question (AgentShield keeps no memory of its own there, and asks that must be asked every time ignore a cached Always allow). It has no prompt hook and its hooks never see tool results, so prompts are not scanned and text hidden in a result is not quarantined (the Rule of Two still follows what was fetched and read) |
 
 Only Claude Code has been checked in real sessions so far. The other apps follow each vendor's documented hook format and are covered by contract tests and by an end-to-end test that runs every installed hook command the way the app does.
 

@@ -83,6 +83,9 @@ interface Ctx {
 const CONTENT_KEYS = ["content", "contents", "new_string", "newString", "new_source", "new_str", "file_text", "text", "code_edit", "replacement", "insert_text", "CodeContent", "ReplacementContent"];
 const PATCH_KEYS = ["patch", "input", "diff"];
 
+/** Apps whose own approval prompt has Allow once and Always allow, and honours a hook's plain "ask" by that memory. */
+const APPS_THAT_REMEMBER = new Set<string>(["antigravity"]);
+
 /** The text a write tool puts into files: new content, replacements, and the added lines of a patch. */
 function writtenContent(input: Record<string, unknown>): string {
   const parts: unknown[] = CONTENT_KEYS.map((k) => input[k]);
@@ -284,9 +287,11 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
 
   // "Allow once, allow similar": an earlier approval turns an ask into a note. It never touches a block,
   // the Rule of Two or the circuit breaker, and the findings (and so the session legs) stay as they were.
+  // Not for an app whose own prompt remembers "Always allow": a hook cannot see which button was pressed, so the app keeps the memory.
+  const appRemembers = APPS_THAT_REMEMBER.has(event.agent);
   let approved = false;
   if (action === "ask" && event.kind === "action" && !ruleOfTwo && !breaker && settings.approvals !== "off") {
-    const lookup: ApprovedLookup = (rule, target) => Boolean(session?.approved?.[approvalId(rule, target)]) || Boolean(opts.approved?.(rule, target));
+    const lookup: ApprovedLookup = (rule, target) => (!appRemembers && Boolean(session?.approved?.[approvalId(rule, target)])) || Boolean(opts.approved?.(rule, target));
     if (allCovered(findings, lookup)) {
       action = "note";
       approved = true;
@@ -329,10 +334,10 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   if (next && event.kind !== "prompt") {
     const sigs = eventSigs(event);
     // An action we asked about ran, so a person said yes: remember it. An ask is remembered until its result arrives.
-    if (event.kind === "result") next = promote(next, sigs);
+    if (event.kind === "result") next = appRemembers ? next : promote(next, sigs);
     else {
       next = { ...next, last: { sig: eventSig(event), at: Date.now() } };
-      if (decision.action === "ask" && decision.asks?.length) next = recordPending(next, sigs, decision.asks);
+      if (decision.action === "ask" && decision.asks?.length && !appRemembers) next = recordPending(next, sigs, decision.asks);
     }
   }
   const A = next ? next.legs.A?.why : legs.A;
