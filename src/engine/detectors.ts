@@ -213,6 +213,12 @@ const EXFIL_INSTRUCTION =
 
 const hasPhrase = (s: string) => INJECTION_PHRASES.some((re) => re.test(s));
 
+/** A prompt asking the agent to send secrets somewhere: the user may not realise what they are asking for. */
+export function exfilRequest(text: string): string | undefined {
+  const m = EXFIL_INSTRUCTION.exec(text.slice(0, MAX_SCAN));
+  return m ? clip(redactSecrets(m[0])) : undefined;
+}
+
 export function injectionFindings(text: string): Finding[] {
   const t = text.slice(0, MAX_SCAN);
   const out: Finding[] = [];

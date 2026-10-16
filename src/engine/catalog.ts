@@ -28,6 +28,7 @@ export const RULES = {
   "EXF-003": { category: "EXFIL", level: "SEVERE", confidence: 0.95, title: "Sends secret content over the network", alternative: NO_SECRETS_OUT },
   "EXF-004": { category: "EXFIL", level: "WARNING", confidence: 0.8, title: "Uploads a file to an outside host", alternative: "Confirm the destination with the user, or upload to an approved company location." },
   "EXF-005": { category: "EXFIL", level: "WARNING", confidence: 0.9, title: "Puts command output into a DNS lookup", alternative: "Run the lookup with a fixed hostname." },
+  "EXF-006": { category: "EXFIL", level: "WARNING", confidence: 0.9, title: "The prompt asks to send secrets to an outside site", alternative: "List the variable names in .env (names only, no values) and explain how to debug the failing request locally." },
 
   // DESTROY
   "DES-001": { category: "DESTROY", level: "SEVERE", confidence: 1, title: "Recursively deletes the home folder, a drive or a system folder", alternative: "Delete only the specific folder inside the project, and list it first (`ls <path>`, or -WhatIf in PowerShell)." },

@@ -20,6 +20,8 @@ export interface HookRunOptions {
   remoteUrl?: (name: string) => string | undefined;
   /** Extra fields for the record (scenario runs). */
   label?: Partial<ShieldRecord>;
+  /** A preloaded policy (the server's demo policy). Otherwise the files are read. */
+  policy?: EffectivePolicy;
 }
 
 export interface HookRun {
@@ -51,7 +53,7 @@ export async function runHook(opts: HookRunOptions): Promise<HookRun> {
 
   let policy: EffectivePolicy;
   try {
-    policy = await loadPolicyAsync({ cwd: event.cwd, env });
+    policy = opts.policy ?? (await loadPolicyAsync({ cwd: event.cwd, env }));
   } catch (err) {
     const what = event.kind === "prompt" ? "prompt" : "action";
     return { event, output: { exitCode: 2, stderr: `AgentShield policy could not be loaded, so this ${what} is denied: ${message(err)}\nFix the file, then run \`agentshield doctor\`.` } };

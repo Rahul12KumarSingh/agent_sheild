@@ -1,0 +1,21 @@
+{
+  "id": "S4",
+  "slug": "key-in-prompt",
+  "title": "A live key pasted into a prompt",
+  "summary": "The developer pastes a cloud key straight into the chat. The prompt never reaches the model, and a safer prompt with a placeholder is offered.",
+  "expected": "SEVERE block with a rewrite using a placeholder",
+  "cwd": "/home/dev/acme-payments",
+  "steps": [
+    {
+      "actor": "user",
+      "say": "A live-looking AWS key is pasted into the prompt. Blocked before the model sees it. The safer prompt uses $AWS_ACCESS_KEY_ID instead.",
+      "event": { "hook_event_name": "UserPromptSubmit", "prompt": "Deploy the build to the staging bucket using AWS key AKIAZ7Q4M2LX9TRB3KPW." },
+      "expect": "block",
+      "expectRules": ["SEC-001"]
+    }
+  ],
+  "withoutShield": {
+    "outcome": "The key is sent to the model provider and stays in the chat history.",
+    "leak": "prompt -> model provider: AKIAZ7Q4M2LX9TRB3KPW"
+  }
+}

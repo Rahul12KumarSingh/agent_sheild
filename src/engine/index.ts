@@ -2,7 +2,7 @@ import { homedir, tmpdir } from "node:os";
 import { DEFAULT_POLICY, type EffectivePolicy } from "../policy/index.js";
 import { clip, dedupe, hit, RULES, type RuleId } from "./catalog.js";
 import { analyzeCommand, commandFindingsInContent, isDumpHost, type OutsideAction, urlHosts } from "./commands.js";
-import { findSecrets, injectionFindings, piiFindings, type PiiOptions, redactSecrets, rewritePrompt } from "./detectors.js";
+import { exfilRequest, findSecrets, injectionFindings, piiFindings, type PiiOptions, redactSecrets, rewritePrompt } from "./detectors.js";
 import { MAX_SCAN } from "./normalize.js";
 import {
   classifyPath,
@@ -140,6 +140,8 @@ function analyzePrompt(text: string, c: Ctx): Finding[] {
   const secrets = findSecrets(text);
   if (secrets.length > 0) findings.push(hit("SEC-001", [...new Set(secrets.map((s) => s.type))].join(", "), clip(redactSecrets(text))));
   findings.push(...piiFindings(text, c.pii));
+  const exfil = exfilRequest(text);
+  if (exfil) findings.push(hit("EXF-006", undefined, exfil));
   return findings;
 }
 
@@ -211,7 +213,7 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
       ruleOfTwo = true;
       findings = [hit("SES-001", `${A.why}; then ${B.why}; now ${legC.why}`), ...findings];
       score = 100;
-    } else if (legC && A) {
+    } else if (legC && A && !legC.allowedRemote) {
       findings = [...findings, hit("SES-002", `${legC.why}, after ${A.why}`)];
       score = Math.min(100, baseScore + 20);
     }
