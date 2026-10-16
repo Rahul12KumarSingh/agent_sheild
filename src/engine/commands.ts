@@ -17,6 +17,8 @@ import type { Finding } from "./types.js";
 
 export interface Segment {
   cmd: string;
+  /** The command word as written, e.g. "./scripts/sync.sh". */
+  word: string;
   args: string[];
   positional: string[];
   redirectsOut: string[];
@@ -101,7 +103,7 @@ export function parseSegments(text: string, depth = 0): Segment[] {
     }
 
     const positional = args.filter((a) => !a.startsWith("-"));
-    result.push({ cmd, args, positional, redirectsOut, redirectsIn, wrappers, text: part.trim() });
+    result.push({ cmd, word: words[0] ?? "", args, positional, redirectsOut, redirectsIn, wrappers, text: part.trim() });
   }
   return result;
 }
@@ -151,6 +153,8 @@ function segmentHosts(s: Segment): string[] {
 
 const isNet = (s: Segment) => NET_CMDS.has(s.cmd) || /net\.webclient|\.upload(file|string|data)\s*\(/i.test(s.text);
 const outsideHosts = (s: Segment) => segmentHosts(s).filter((h) => !isLocalHost(h));
+
+export const hostAllowed = (host: string, allowed: string[]) => allowed.some((a) => host === a || host.endsWith(`.${a}`));
 
 /** Files a network command sends. "-" means stdin. */
 function uploads(s: Segment): string[] {
@@ -278,11 +282,17 @@ const REMOTE_TO_SHELL: RegExp[] = [
 const EXECUTES_DECODED =
   /\|\s*(?:sudo\s+)?(?:(?:ba|z|da)?sh|python3?|node|perl|ruby|iex|invoke-expression)\b|\beval\b|\biex\b|invoke-expression|\b(?:powershell|pwsh)(?:\.exe)?\b[^|]*\s-e(?:nc\w*|c)?\b/i;
 
-function analyzeVariant(text: string, ctx: PathContext, excerpt: string): Finding[] {
+function analyzeVariant(text: string, ctx: PathContext, excerpt: string, allowedHosts: string[]): Finding[] {
   const out: Finding[] = [];
   const segs = parseSegments(text);
 
   for (const s of segs) {
+    // The agent loosening its own settings through our CLI is tampering, like editing the files directly.
+    if ((s.cmd === "agentshield" || (s.cmd === "node" && /agentshield|cli\.js/i.test(s.positional[0] ?? ""))) &&
+        /\bconfig\s+set\b|\binit\b.*--remove|\buninstall\b/i.test(s.args.join(" "))) {
+      out.push(hit("TAM-001", "agentshield settings", excerpt));
+    }
+
     // Deleting
     const targets = deleteTargets(s);
     for (const t of targets ?? []) {
@@ -314,7 +324,7 @@ function analyzeVariant(text: string, ctx: PathContext, excerpt: string): Findin
       for (const f of uploads(s)) {
         if (f === "-") continue; // stdin: the pipe analysis below decides
         if (isSecretPath(f, ctx) && (outside.length > 0 || segmentHosts(s).length === 0)) out.push(hit("EXF-002", `${f} to ${outside[0] ?? "an outside host"}`, excerpt));
-        else if (outside.length > 0) out.push(hit("EXF-004", `${f} to ${outside[0]}`, excerpt));
+        else if (outside.some((h) => !hostAllowed(h, allowedHosts))) out.push(hit("EXF-004", `${f} to ${outside[0]}`, excerpt));
       }
       for (const h of segmentHosts(s)) if (isDumpHost(h)) out.push(hit("EXF-001", h, excerpt));
     }
@@ -389,14 +399,109 @@ export interface CommandAnalysis {
   disguised: boolean;
 }
 
-export function analyzeCommand(command: string, ctx: PathContext): CommandAnalysis {
+export interface CommandOptions {
+  allowedHosts?: string[];
+  extraAskCommands?: string[];
+}
+
+export function analyzeCommand(command: string, ctx: PathContext, opts: CommandOptions = {}): CommandAnalysis {
   const norm = normalizeCommand(command);
   const excerpt = clip(redactSecrets(command));
   const findings: Finding[] = [];
-  for (const variant of norm.variants) findings.push(...analyzeVariant(variant, ctx, excerpt));
+  for (const variant of norm.variants) findings.push(...analyzeVariant(variant, ctx, excerpt, opts.allowedHosts ?? []));
   if (norm.decoded.length && EXECUTES_DECODED.test(command)) findings.push(hit("EXE-002", undefined, excerpt));
   if (norm.disguised) findings.push(hit("OBF-001", undefined, excerpt));
+  const asks = (opts.extraAskCommands ?? []).map((c) => c.toLowerCase().replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (asks.length) {
+    for (const variant of norm.variants) {
+      for (const s of parseSegments(variant)) {
+        const line = [s.cmd, ...s.args].join(" ").toLowerCase();
+        const match = asks.find((a) => line === a || line.startsWith(`${a} `));
+        if (match) findings.push(hit("POL-001", match, excerpt));
+      }
+    }
+  }
   return { findings: dedupe(findings), disguised: norm.disguised };
+}
+
+// ---------- Outside actions (leg C of the Rule of Two) ----------
+
+export interface OutsideAction {
+  why: string;
+  /** A git push to a remote the company allows: the Rule of Two asks instead of blocking. */
+  allowedRemote?: boolean;
+}
+
+export interface OutsideOptions {
+  allowedHosts: string[];
+  allowedRemotes: string[];
+  /** Resolve a git remote name (e.g. origin) to its URL. */
+  remoteUrl?: (name: string) => string | undefined;
+}
+
+/** `git@github.com:acme/app.git`, `https://github.com/acme/app.git` -> `github.com/acme/app`. */
+export function normalizeRemote(url: string): string {
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/^[a-z+]+:\/\//, "")
+    .replace(/^[^@/]+@/, "")
+    .replace(/^([^/:]+):(?!\d)/, "$1/")
+    .replace(/\.git$/, "")
+    .replace(/\/+$/, "");
+}
+
+export const remoteAllowed = (url: string, allowed: string[]) => {
+  const r = normalizeRemote(url);
+  return allowed.some((a) => r === a || r.startsWith(`${a}/`));
+};
+
+const PUBLISH: Array<[RegExp, string]> = [
+  [/^(npm|pnpm|yarn|bun) publish\b/, "publishes a package"],
+  [/^(twine|python3? -m twine) upload\b/, "publishes a package"],
+  [/^(cargo publish|gem push|dotnet nuget push|nuget push)\b/, "publishes a package"],
+  [/^(docker|podman) push\b/, "pushes an image"],
+  [/^gh (gist create|release create|issue create|issue comment|pr create|pr comment|repo create|api)\b/, "posts to GitHub"],
+  [/^(aws s3 (cp|sync|mv)|gsutil (cp|rsync|mv)|gcloud storage (cp|rsync|mv)|az storage blob upload|rclone (copy|sync))\b/, "copies to cloud storage"],
+  [/^(kubectl (apply|delete|create|replace|patch)|helm (install|upgrade|uninstall)|terraform (apply|destroy))\b/, "changes infrastructure"],
+];
+
+export function outsideCommand(command: string, ctx: PathContext, opts: OutsideOptions): OutsideAction | undefined {
+  for (const variant of normalizeCommand(command).variants) {
+    for (const s of parseSegments(variant)) {
+      const line = [s.cmd, ...s.args].join(" ").toLowerCase();
+      if (s.cmd === "git" && s.positional[0] === "push") {
+        const target = s.positional[1] ?? "origin";
+        const url = /[:/]/.test(target) ? target : opts.remoteUrl?.(target);
+        if (url && remoteAllowed(url, opts.allowedRemotes)) return { why: `git push to an allowed remote (${normalizeRemote(url)})`, allowedRemote: true };
+        return { why: `git push to ${url ? normalizeRemote(url) : target}` };
+      }
+      const publish = PUBLISH.find(([re]) => re.test(line));
+      if (publish) return { why: `${publish[1]}: ${clip(line, 60)}` };
+      // Other gh commands read from GitHub (issues, PRs): inbound, so not an outside action.
+      if (isNet(s) && s.cmd !== "gh") {
+        const host = outsideHosts(s).find((h) => !hostAllowed(h, opts.allowedHosts));
+        if (host) return { why: `network call to ${host}` };
+      }
+      for (const t of writeTargets(s)) {
+        const where = classifyPath(t, ctx);
+        if (where === "outside" || where === "home" || where === "system" || where === "root") return { why: `writes outside the project (${t})` };
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Commands whose output is a stranger's text (leg A): fetching from the internet, reading issues. */
+export function fetchesOutsideText(command: string): string | undefined {
+  for (const s of parseSegments(normalizeCommand(command).variants.at(-1) ?? command)) {
+    if (s.cmd === "gh" && /^(issue|pr|release|gist|api|repo|search|run)$/.test(s.positional[0] ?? "")) return "GitHub content";
+    if (isNet(s)) {
+      const host = outsideHosts(s)[0];
+      if (host) return `content from ${host}`;
+    }
+  }
+  return undefined;
 }
 
 /** Risky commands inside a file the agent writes (staged payloads). */

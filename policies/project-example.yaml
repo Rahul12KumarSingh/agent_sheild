@@ -1,0 +1,17 @@
+# Example project policy: copy to <your repo>/.agentshield/policy.yaml.
+# A project can make rules stricter. It cannot loosen anything the company locked,
+# and it cannot remove a protected path: such lines are ignored and shown by
+# `agentshield config explain <key>`.
+
+warning_action: ask
+
+protected_paths:
+  - "config/production.yaml"
+  - "!.env"                 # ignored: built-in protections cannot be removed
+
+extra_ask_commands:
+  - npm publish
+  - docker push
+
+allowed_hosts:
+  - api.partner.example     # ignored when the company locked allowed_hosts

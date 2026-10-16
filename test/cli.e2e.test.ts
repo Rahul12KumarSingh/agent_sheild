@@ -7,9 +7,11 @@ import { describe, expect, it } from "vitest";
 // Runs the built hook exactly as an agent app does: a separate process, JSON on stdin.
 // Same code path on macOS, Windows and Linux (CI runs all three). Needs `npm run build` first.
 const cli = join(import.meta.dirname, "..", "dist", "cli.js");
+const home = mkdtempSync(join(tmpdir(), "agentshield-e2e-"));
+const env = { ...process.env, AGENTSHIELD_HOME: home, AGENTSHIELD_COMPANY_POLICY: "", CI: "" };
 
 function hook(payload: string, ...extra: string[]) {
-  return spawnSync(process.execPath, [cli, "hook", "claude", ...extra], { input: payload, encoding: "utf8" });
+  return spawnSync(process.execPath, [cli, "hook", "claude", ...extra], { input: payload, encoding: "utf8", env });
 }
 
 const pre = (command: string) =>

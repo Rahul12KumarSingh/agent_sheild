@@ -1,4 +1,4 @@
-import { evaluate, type EngineContext } from "../src/engine/index.js";
+import { evaluate, type EngineContext, type EvaluateOptions, newSession, type SessionState } from "../src/engine/index.js";
 import type { ShieldEvent } from "../src/engine/types.js";
 
 // Fixed contexts so tests give the same result on macOS, Windows and Linux.
@@ -20,7 +20,16 @@ export const prompt = (text: string): ShieldEvent => ({ ...base, kind: "prompt",
 export const result = (tool: string, output: unknown): ShieldEvent => ({ ...base, kind: "result", tool, input: {}, output });
 
 export const isWindowsEvent = (e: ShieldEvent) => /^[a-zA-Z]:\\/.test(e.cwd);
-export const run = (e: ShieldEvent) => evaluate(e, isWindowsEvent(e) ? WINDOWS : POSIX);
+export const run = (e: ShieldEvent, opts: EvaluateOptions = {}) => evaluate(e, isWindowsEvent(e) ? WINDOWS : POSIX, opts);
+
+/** A session that already holds the given Rule of Two legs. */
+export function sessionWith(legs: { A?: string; B?: string }, blocks = 0): SessionState {
+  const s = newSession("test");
+  if (legs.A) s.legs.A = { at: s.createdAt, why: legs.A };
+  if (legs.B) s.legs.B = { at: s.createdAt, why: legs.B };
+  s.blocks = blocks;
+  return s;
+}
 
 /** Invisible Unicode tag characters spelling out `text`. */
 export const tags = (text: string) => [...text].map((c) => String.fromCodePoint(0xe0000 + c.charCodeAt(0))).join("");

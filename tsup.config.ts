@@ -14,5 +14,6 @@ export default defineConfig({
   splitting: false,
   clean: true,
   sourcemap: false,
-  banner: { js: "#!/usr/bin/env node" },
+  // Some bundled CommonJS dependencies (yaml) call require() for Node built-ins.
+  banner: { js: '#!/usr/bin/env node\nimport { createRequire as __agentshieldRequire } from "node:module";\nconst require = __agentshieldRequire(import.meta.url);' },
 });

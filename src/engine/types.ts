@@ -70,4 +70,8 @@ export interface Decision {
   reason: string;
   /** Required whenever action is "block". */
   safeAlternative?: string;
+  /** Monitor mode: what enforce mode would have done. The action itself is then "allow". */
+  monitored?: Action;
+  /** The Rule of Two legs after this event (A stranger's text, B sensitive data, C this action reaches outside). */
+  session?: { A?: string; B?: string; C?: string; blocks: number; ruleOfTwo: boolean };
 }

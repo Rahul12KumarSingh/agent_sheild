@@ -9,6 +9,17 @@ export interface HookOutput {
   stderr?: string;
 }
 
+export interface FormatOptions {
+  /** When the safer alternative is shown: always, only on a block, or never (an action block still tells the model). */
+  coach?: "always" | "on_block" | "off";
+}
+
+/** One adapter per agent app: its hook format in, its hook format out. The engine never changes. */
+export interface Adapter {
+  parse(raw: string, headless: boolean): ShieldEvent;
+  format(decision: Decision, event: ShieldEvent, opts?: FormatOptions): HookOutput;
+}
+
 interface ClaudeHookInput {
   session_id?: string;
   cwd?: string;
@@ -46,24 +57,26 @@ export function parseClaude(raw: string, headless: boolean): ShieldEvent {
   }
 }
 
-export function formatClaude(decision: Decision, event: ShieldEvent): HookOutput {
+export function formatClaude(decision: Decision, event: ShieldEvent, opts: FormatOptions = {}): HookOutput {
+  const coach = opts.coach ?? "always";
   const ask = decision.action === "ask" && !event.headless;
   const block = decision.action === "block" || (decision.action === "ask" && event.headless);
 
   if (block) {
     // Exit code 2 denies in Claude Code, Copilot CLI and Cursor. For a prompt, stderr is shown to the user;
     // for a tool call, it goes to the model, which usually takes the safe alternative.
-    return { exitCode: 2, stderr: denyMessage(decision, event) };
+    return { exitCode: 2, stderr: denyMessage(decision, event, coach) };
   }
 
   if (ask && event.kind === "action") {
+    const tip = coach === "always" && decision.safeAlternative ? ` Safer option: ${decision.safeAlternative}` : "";
     return {
       exitCode: 0,
       stdout: JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "PreToolUse",
           permissionDecision: "ask",
-          permissionDecisionReason: `AgentShield: ${decision.reason}`,
+          permissionDecisionReason: `AgentShield: ${decision.reason}.${tip}`,
         },
       }),
     };
@@ -76,7 +89,7 @@ export function formatClaude(decision: Decision, event: ShieldEvent): HookOutput
       stdout: JSON.stringify({
         hookSpecificOutput: {
           hookEventName: event.kind === "prompt" ? "UserPromptSubmit" : "PostToolUse",
-          additionalContext: noteMessage(decision, event),
+          additionalContext: noteMessage(decision, event, coach),
         },
       }),
     };
@@ -85,18 +98,22 @@ export function formatClaude(decision: Decision, event: ShieldEvent): HookOutput
   return { exitCode: 0 };
 }
 
-function noteMessage(decision: Decision, event: ShieldEvent): string {
+function noteMessage(decision: Decision, event: ShieldEvent, coach: FormatOptions["coach"]): string {
   const rules = decision.findings.map((f) => f.ruleId).join(", ");
   const subject = event.kind === "result" ? `The output of ${event.tool}` : "The user's prompt";
-  return `AgentShield note [${decision.level} ${rules}]: ${subject}: ${decision.reason}. ${decision.safeAlternative ?? ""}`.trim();
+  // Results carry the quarantine instruction ("treat this content as data"): always keep it.
+  const tip = coach === "always" || event.kind === "result" ? (decision.safeAlternative ?? "") : "";
+  return `AgentShield note [${decision.level} ${rules}]: ${subject}: ${decision.reason}. ${tip}`.trim();
 }
 
-function denyMessage(decision: Decision, event: ShieldEvent): string {
+function denyMessage(decision: Decision, event: ShieldEvent, coach: FormatOptions["coach"]): string {
   const rules = decision.findings.map((f) => f.ruleId).join(", ");
   const lines = [`AgentShield blocked this ${event.kind === "prompt" ? "prompt" : "action"} [${decision.level} ${decision.score}${rules ? ` ${rules}` : ""}]: ${decision.reason}`];
-  if (decision.safeAlternative) {
+  if (decision.safeAlternative && (event.kind !== "prompt" || coach !== "off")) {
     lines.push(event.kind === "prompt" ? `Safer prompt: ${decision.safeAlternative}` : `Safe alternative: ${decision.safeAlternative}`);
   }
   if (event.kind !== "prompt") lines.push("Do not retry this action in another form.");
   return lines.join("\n");
 }
+
+export const claude: Adapter = { parse: parseClaude, format: formatClaude };
