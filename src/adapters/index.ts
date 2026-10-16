@@ -1,3 +1,4 @@
+import { antigravity } from "./antigravity.js";
 import { claude } from "./claude.js";
 import { copilot } from "./copilot.js";
 import { cursor } from "./cursor.js";
@@ -8,9 +9,9 @@ import { windsurf } from "./windsurf.js";
 export type { Adapter, FormatOptions, HookOutput } from "./types.js";
 
 /** Every agent app we speak to. Order matters for detection: the most specific shapes first. */
-export const ADAPTERS: Record<string, Adapter> = { claude, copilot, cursor, windsurf, gemini };
+export const ADAPTERS: Record<string, Adapter> = { claude, copilot, cursor, windsurf, gemini, antigravity };
 
-const DETECTION_ORDER: Adapter[] = [windsurf, cursor, gemini, copilot, claude];
+const DETECTION_ORDER: Adapter[] = [antigravity, windsurf, cursor, gemini, copilot, claude];
 
 /**
  * Pick the adapter for a payload. The hook file's own idea of the agent (`hook claude`) is only a hint:

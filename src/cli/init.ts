@@ -8,7 +8,7 @@ import type { HookOutput } from "../adapters/types.js";
 // Copilot CLI, Cursor and VS Code also read .claude/settings.json and only understand `command`. Given just `node`,
 // they would feed the hook message to Node as a script, exit 1, and (Copilot CLI) deny every tool call as "hook errored".
 
-export const AGENT_NAMES = ["claude", "copilot", "cursor", "windsurf", "gemini"] as const;
+export const AGENT_NAMES = ["claude", "copilot", "cursor", "windsurf", "gemini", "antigravity"] as const;
 export type AgentName = (typeof AGENT_NAMES)[number];
 
 /** Forward slashes work on every OS and avoid JSON escaping surprises on Windows. */
@@ -17,7 +17,7 @@ export const cliPath = (fileUrlPath: string) => fileUrlPath.replace(/\\/g, "/");
 export const hookCommand = (cli: string, agent: string) => `node "${cli}" hook ${agent}`;
 
 /** Is this command line ours (any agent, any path)? Also recognises the old exec form (`node` + args). */
-export const isOurCommand = (line: string) => /\bhook\s+(?:claude|copilot|cursor|windsurf|gemini|auto)\b/.test(line) && /agentshield|cli\.js/i.test(line);
+export const isOurCommand = (line: string) => /\bhook\s+(?:claude|copilot|cursor|windsurf|gemini|antigravity|auto)\b/.test(line) && /agentshield|cli\.js/i.test(line);
 
 // ---------- Claude Code and Gemini CLI: groups of handlers per event ----------
 
@@ -91,6 +91,29 @@ const GEMINI_PLAN = [{ event: "BeforeAgent" }, { event: "BeforeTool", matcher: "
 
 export const installClaude = (settings: Settings, cli: string, remove = false) => installGroups(settings, CLAUDE_PLAN, ourHandler(cli), remove);
 export const installGemini = (settings: Settings, cli: string, remove = false) => installGroups(settings, GEMINI_PLAN, geminiHandler(cli), remove);
+
+// ---------- Antigravity CLI: hooks.json maps a hook name to its events ----------
+
+/** The event is not in Antigravity's payload, so each entry says which one it is. */
+export function antigravityHandler(cli: string, event: "PreToolUse" | "PostToolUse"): Handler {
+  return { type: "command", command: `${hookCommand(cli, "antigravity")}${event === "PostToolUse" ? " --event PostToolUse" : ""}`, timeout: 30 };
+}
+
+/** Our hooks live under the name "agentshield" in hooks.json. Other hook names are never touched. */
+export function installAntigravity(file: Record<string, unknown>, cli: string, remove = false): { settings: Record<string, unknown>; changes: string[] } {
+  const own = file.agentshield && typeof file.agentshield === "object" && !Array.isArray(file.agentshield) ? (file.agentshield as Record<string, Group[]>) : {};
+  let state: Settings = { hooks: structuredClone(own) };
+  const changes: string[] = [];
+  for (const event of ["PreToolUse", "PostToolUse"] as const) {
+    const r = installGroups(state, [{ event, matcher: "*" }], antigravityHandler(cli, event), remove);
+    state = r.settings;
+    changes.push(...r.changes);
+  }
+  const next = { ...file };
+  if (state.hooks && Object.keys(state.hooks).length > 0) next.agentshield = state.hooks;
+  else delete next.agentshield;
+  return { settings: next, changes };
+}
 
 // ---------- Cursor and Windsurf: one flat entry per event ----------
 
@@ -186,6 +209,8 @@ export function targetFor(agent: AgentName, o: { user: boolean; cwd: string; hom
       return { path: join(root, ".claude", "settings.json"), apply: (d, c, r) => { const x = installClaude(d as Settings, c, r); return { data: x.settings, changes: x.changes }; } };
     case "gemini":
       return { path: join(root, ".gemini", "settings.json"), apply: (d, c, r) => { const x = installGemini(d as Settings, c, r); return { data: x.settings, changes: x.changes }; } };
+    case "antigravity":
+      return { path: o.user ? join(home, ".gemini", "config", "hooks.json") : join(root, ".agents", "hooks.json"), apply: (d, c, r) => { const x = installAntigravity(d, c, r); return { data: x.settings, changes: x.changes }; } };
     case "cursor":
       return { path: join(root, ".cursor", "hooks.json"), apply: (d, c, r) => { const x = installCursor(d as FlatFile, c, r); return { data: x.file, changes: x.changes }; } };
     case "windsurf": {
@@ -215,6 +240,7 @@ const RESTART: Record<AgentName, string> = {
   cursor: "Cursor reloads hooks.json on save (check the Hooks output channel). Cursor cannot ask on file reads, so those asks become a deny with the approval command.",
   windsurf: "Restart Windsurf (Devin Desktop). Windsurf hooks cannot ask, so asks become a deny with the approval command.",
   gemini: "Restart Gemini CLI. Gemini hooks cannot ask, so asks become a deny with the approval command.",
+  antigravity: "Restart Antigravity CLI (type /hooks to see it). It has no prompt hook, so prompts are not scanned, and its hooks never see tool results, so text hidden in a result is not quarantined.",
 };
 
 function initOne(agent: AgentName, o: { user: boolean; remove: boolean; cwd: string; cli: string; home?: string }): HookOutput {

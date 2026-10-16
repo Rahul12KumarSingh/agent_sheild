@@ -19,7 +19,7 @@ export type Category =
   | "SESSION"
   | "GIT";
 
-export type AgentId = "claude" | "copilot" | "cursor" | "windsurf" | "gemini" | "scripted";
+export type AgentId = "claude" | "copilot" | "cursor" | "windsurf" | "gemini" | "antigravity" | "scripted";
 
 interface EventBase {
   agent: AgentId;

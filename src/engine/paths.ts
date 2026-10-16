@@ -136,6 +136,9 @@ const GUARDRAIL_FILES: RegExp[] = [
   /\/\.(windsurf|devin)\/hooks\.json$/,
   /\/\.codeium\/(windsurf\/)?hooks\.json$/,
   /\/\.gemini\/settings\.json$/,
+  /\/\.agents\/hooks\.json$/,
+  /\/\.gemini\/config\/hooks\.json$/,
+  /\/\.gemini\/antigravity(-cli|-ide)?\/settings\.json$/,
   /\/\.codex\/(hooks\.json|config\.toml)$/,
   // Company-wide locations (policy, managed settings)
   /\/etc\/(github-copilot\/policy\.d|cursor|devin|windsurf|agentshield|claude-code)(\/|$)/,
@@ -144,7 +147,7 @@ const GUARDRAIL_FILES: RegExp[] = [
 ];
 
 /** The folders that hold those files. Deleting or moving one removes the guardrails with it. */
-const GUARDRAIL_DIRS = /\/\.(claude|cursor|windsurf|devin|gemini|codex|copilot|agentshield|codeium(?:\/windsurf)?|github(?:\/hooks|\/copilot)?)$/;
+const GUARDRAIL_DIRS = /\/\.(claude|cursor|windsurf|devin|gemini|codex|copilot|agentshield|agents|codeium(?:\/windsurf)?|github(?:\/hooks|\/copilot)?)$/;
 
 /** Hook settings and AgentShield's own policy: the agent must never change these. */
 export function isGuardrailPath(raw: string, ctx: PathContext): boolean {
@@ -178,7 +181,7 @@ export function isInstructionPath(raw: string, ctx: PathContext): boolean {
   const base = baseName(p);
   return (
     ["claude.md", "claude.local.md", "agents.md", "gemini.md", ".cursorrules", ".windsurfrules", ".clinerules", "copilot-instructions.md", ".mcp.json"].includes(base) ||
-    /\/\.(cursor\/rules|cursor\/mcp\.json|vscode\/mcp\.json|windsurf\/rules|windsurf\/workflows|claude\/agents|claude\/commands|claude\/skills|github\/instructions)(\/|$)/.test(p)
+    /\/\.(cursor\/rules|cursor\/mcp\.json|vscode\/mcp\.json|windsurf\/rules|windsurf\/workflows|claude\/agents|claude\/commands|claude\/skills|github\/instructions|agents\/(mcp_config\.json|skills|rules)|gemini\/config\/mcp_config\.json)(\/|$)/.test(p)
   );
 }
 

@@ -31,22 +31,33 @@ export function asInput(v: unknown): Record<string, unknown> {
 const COMMAND = /^(bash|shell|sh|zsh|powershell|pwsh|cmd|terminal|exec|execute|local_shell|run_command|run_terminal_cmd|run_terminal_command|run_in_terminal|run_shell_command|execute_command|execute_bash|exec_command|shell_command|bash_command|terminal_command|run_bash|container_exec)$/;
 const READ = /^(read|view|read_file|readfile|open_file|view_file|cat|read_many_files|read_text_file|get_file_contents|notebookread|notebook_read|read_notebook)$/;
 const DELETE = /^(delete|delete_file|delete_files|remove|remove_file|rm|unlink)$/;
-const WRITE = /^(write|create|edit|multiedit|multi_edit|notebookedit|notebook_edit|str_replace_editor|str_replace_based_edit_tool|str_replace|strreplace|apply_patch|applypatch|create_file|write_file|write_to_file|edit_file|replace|replace_in_file|replace_string_in_file|multi_replace_string_in_file|insert_edit_into_file|insert|update_file|patch|edit_notebook_file|create_or_update_file|file_write|file_edit|save_file)$/;
+const WRITE = /^(write|create|edit|multiedit|multi_edit|notebookedit|notebook_edit|str_replace_editor|str_replace_based_edit_tool|str_replace|strreplace|apply_patch|applypatch|create_file|write_file|write_to_file|edit_file|replace|replace_in_file|replace_file_content|multi_replace_file_content|replace_string_in_file|multi_replace_string_in_file|insert_edit_into_file|insert|update_file|patch|edit_notebook_file|create_or_update_file|file_write|file_edit|save_file)$/;
 const GREP = /^(grep|rg|ripgrep|grep_search|search_file_content|search_files|search_code|search_code_subagent|semantic_search|codebase_search|search)$/;
-const GLOB = /^(glob|file_search|find_files|find)$/;
+const GLOB = /^(glob|file_search|find_files|find|find_by_name)$/;
 const LIST = /^(ls|list|list_dir|list_directory|list_files|tree|read_directory)$/;
 const FETCH = /^(webfetch|web_fetch|fetch|fetch_webpage|fetch_url|browse|browser|open_url|read_url_content|get_url)$/;
 const WEB_SEARCH = /^(websearch|web_search|google_web_search|search_web|internet_search)$/;
-const TASK = /^(task|agent|subagent|runsubagent|run_subagent|spawn_agent|search_subagent)$/;
+const TASK = /^(task|agent|subagent|runsubagent|run_subagent|spawn_agent|search_subagent|invoke_subagent)$/;
 
 const PATH_KEYS = [
   "file_path", "filePath", "filepath", "path", "file", "filename", "target_file", "targetFile", "absolute_path",
   "absolutePath", "notebook_path", "notebookPath", "uri", "target", "dir_path", "dirPath", "directory", "folder", "dir", "root",
+  "AbsolutePath", "TargetFile", "DirectoryPath", "SearchDirectory", "SearchPath",
 ];
-const COMMAND_KEYS = ["command", "cmd", "command_line", "commandLine", "script"];
-const URL_KEYS = ["url", "uri", "link", "href"];
+const COMMAND_KEYS = ["command", "cmd", "command_line", "commandLine", "script", "CommandLine"];
+const URL_KEYS = ["url", "uri", "link", "href", "Url"];
 /** Where a content search is told to look, besides a folder: VS Code `includePattern`, Claude Code `glob`. */
-const SCOPE_KEYS = ["includePattern", "include_pattern", "include", "glob", "file_pattern", "filePattern"];
+const SCOPE_KEYS = ["includePattern", "include_pattern", "include", "glob", "file_pattern", "filePattern", "Includes"];
+
+/** One scope string from a search call; a list of globs gives the first one. */
+function scopeOf(input: Record<string, unknown>): string | undefined {
+  for (const k of SCOPE_KEYS) {
+    const v = input[k];
+    const one = Array.isArray(v) ? v.find((x) => typeof x === "string" && x.trim() !== "") : str(v);
+    if (typeof one === "string") return one;
+  }
+  return undefined;
+}
 const PATCH_KEYS = ["patch", "input", "diff", "content", "text", "command"];
 
 /** `file:///c%3A/Users/me/a.ts` -> `c:/Users/me/a.ts`. */
@@ -144,7 +155,7 @@ export function canonicalize(rawTool: string, rawInput: unknown): Canonical {
   if (mcp) return { tool: mcp, input, ...(mcp !== name ? { rawTool: name } : {}) };
 
   const result = (tool: string): Canonical => ({ tool, input, ...(tool !== name ? { rawTool: name } : {}) });
-  const command = commandOf(original) ?? taskCommand(original);
+  const command = commandOf(original) ?? taskCommand(original) ?? (n === "manage_task" && /send_input/i.test(String(original.Action)) ? str(original.Input) : undefined);
   const path = firstPath(original);
 
   if (COMMAND.test(n) || (command && !WRITE.test(n) && !READ.test(n))) {
@@ -187,7 +198,7 @@ export function canonicalize(rawTool: string, rawInput: unknown): Canonical {
 
   if (GREP.test(n) || GLOB.test(n) || LIST.test(n)) {
     // A content search told to look only in `.env*` reads secrets like a file read does, so its scope is a path too.
-    const scope = GREP.test(n) ? SCOPE_KEYS.map((k) => str(original[k])).find(Boolean) : undefined;
+    const scope = GREP.test(n) ? scopeOf(original) : undefined;
     if (path) input.file_path = path;
     else if (scope) input.file_path = scope;
     if (path && scope) input.paths = [path, scope];

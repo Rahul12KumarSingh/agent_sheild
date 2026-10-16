@@ -67,6 +67,7 @@ export function SourceTag({ r }: { r: ShieldRecord }) {
   if (r.agent === "cursor") return <span className="tag tag-real">Real Cursor</span>;
   if (r.agent === "windsurf") return <span className="tag tag-real">Real Windsurf</span>;
   if (r.agent === "gemini") return <span className="tag tag-real">Real Gemini CLI</span>;
+  if (r.agent === "antigravity") return <span className="tag tag-real">Real Antigravity CLI</span>;
   return <span className="tag">{r.agent}</span>;
 }
 

@@ -89,7 +89,7 @@ export function sanitizeIncoming(body: unknown): ShieldRecord | undefined {
   return {
     id: randomUUID(),
     ts: new Date().toISOString(),
-    agent: /^(claude|copilot|cursor|windsurf|gemini|scripted)$/.test(String(b.agent)) ? String(b.agent) : "unknown",
+    agent: /^(claude|copilot|cursor|windsurf|gemini|antigravity|scripted)$/.test(String(b.agent)) ? String(b.agent) : "unknown",
     session: str(b.session, 16) ?? "unknown",
     kind: b.kind as ShieldRecord["kind"],
     ...(str(b.tool, 60) ? { tool: str(b.tool, 60) } : {}),

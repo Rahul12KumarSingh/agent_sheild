@@ -8,7 +8,7 @@
 | Problem | How can an enterprise let engineers use autonomous AI coding agents without leaking credentials, exposing customer data or losing systems, when model filters know nothing about company policy and cannot be audited? |
 | Live console | _link added at deploy time_ |
 | Built with | TypeScript on Node 22/24, Hono, React + Vite, **Gemini on Vertex AI**, **Google Cloud Run** |
-| Agents | Claude Code, GitHub Copilot (CLI, cloud agent, VS Code), Cursor, Windsurf and Gemini CLI through their hook files; any MCP client (advice only) |
+| Agents | Claude Code, GitHub Copilot (CLI, cloud agent, VS Code), Cursor, Windsurf, Gemini CLI and Antigravity CLI through their hook files; any MCP client (advice only) |
 
 ## The problem in one paragraph
 
@@ -35,7 +35,7 @@ An agent session may hold at most two of: **A** a stranger's text, **B** sensiti
 | **Engine** (`src/engine`) | 53 rules across secrets, personal data (card, PAN, Aadhaar), injection, exfiltration, destruction, risky execution, privilege, supply chain, tampering, and commits (a secret, a planted instruction or a changed agent setup inside a diff). Undoes disguises (`r""m`, `$IFS`, `r\m`, base64, PowerShell `-EncodedCommand`, string concatenation, backticks, commands inside `bash -c`). Transparent 0 to 100 score, four levels, and a safe alternative for every block. Pure code: no network, about 0.1 ms per decision |
 | **Session memory** | The Rule of Two, a circuit breaker after repeated blocks, tracking of scripts the agent wrote (write a payload now, run it later), and what you already approved (asked once, not asked again) |
 | **Policy layers** (`src/policy`) | Company, then role profile (developer, tester, intern, contractor), then project, then personal. Strictest wins, locked rules never loosen, a malformed policy file falls back to strict built-in settings (and `doctor` names the fix) instead of stopping all work. Monitor mode for pilots |
-| **Hooks** (`src/hook`, `src/adapters`) | One engine, a thin adapter per agent app (Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini CLI). The message is recognised by its shape, so one settings file that several apps read works for all of them. Each app's own way to block, the agent's own approval prompt on WARNING, quarantine notes on poisoned tool results. Reads, searches and listing folders are never held up. An internal error denies |
+| **Hooks** (`src/hook`, `src/adapters`) | One engine, a thin adapter per agent app (Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini CLI, Antigravity CLI). The message is recognised by its shape, so one settings file that several apps read works for all of them. Each app's own way to block, the agent's own approval prompt on WARNING, quarantine notes on poisoned tool results. Reads, searches and listing folders are never held up. An internal error denies |
 | **Commit and PR guard** | Before `git commit`, `git push` or `gh pr create`, the change that is about to leave is scanned: live secrets and secret files are blocked; changes to agent hooks, MCP servers or instruction files, risky commands added to scripts or CI files, and hidden characters or text aimed at agents are asked about |
 | **CLI** (`src/cli`) | `init`, `doctor`, `check`, `allow`, `approvals`, `config show/explain/set`, `serve`, `mcp`, `hook` |
 | **Console** (`console/`, `src/server`) | Live feed over server-sent events, the attack replay, the split view (what the agent tried / what AgentShield did), Prompt Coach, policy and insights pages. Works at 360 px |
@@ -78,6 +78,7 @@ node /path/to/agentshield/dist/cli.js doctor            # runs every hook the wa
 | Cursor | `.cursor/hooks.json` (it can also read `.claude/settings.json`) | Block prompts, shell, MCP, file edits and reads. Asks on shell and MCP; an ask on a read or an edit becomes a deny that carries the `agentshield allow` command to run |
 | Windsurf (Devin Desktop) | `.windsurf/hooks.json` or `.devin/hooks.json` | Block prompts, shell, reads, edits and MCP. It cannot ask, so an ask is a deny that carries the `agentshield allow` command |
 | Gemini CLI | `.gemini/settings.json` | Block prompts and tool calls. It cannot ask: same as Windsurf |
+| Antigravity CLI (Gemini CLI's successor) | `.agents/hooks.json` | Block and ask on tool calls, with a question that a cached "Always allow" cannot skip. It has no prompt hook and its hooks never see tool results, so prompts are not scanned and text hidden in a result is not quarantined (the Rule of Two still follows what was fetched and read) |
 
 Only Claude Code has been checked in real sessions so far. The other apps follow each vendor's documented hook format and are covered by contract tests and by an end-to-end test that runs every installed hook command the way the app does.
 
@@ -174,7 +175,7 @@ Measured, not claimed: see [docs/EVALUATION.md](docs/EVALUATION.md) (regenerate 
 ```text
 src/engine      rules, normaliser, paths, scoring, session memory (pure code)
 src/policy      policy layers, validation, merge
-src/adapters    hook formats of Claude Code, GitHub Copilot, Cursor, Windsurf and Gemini CLI
+src/adapters    hook formats of Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini CLI and Antigravity CLI
 src/hook        the hook runtime: policy + session + adapter + audit log + console
 src/cli         init, doctor, check, config, serve, mcp
 src/server      the API: feed, stream, Prompt Coach, scenarios, policy, Gemini explain

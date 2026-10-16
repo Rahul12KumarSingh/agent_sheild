@@ -16,7 +16,7 @@ const CLI = fileURLToPath(import.meta.url);
 const USAGE = `agentshield ${VERSION}: a policy checkpoint for AI coding agents
 
 Usage:
-  agentshield init [--agent claude|copilot|cursor|windsurf|gemini|all] [--user] [--remove]
+  agentshield init [--agent claude|copilot|cursor|windsurf|gemini|antigravity|all] [--user] [--remove]
                                          Add the hooks to an agent app's settings (project, or --user for every project)
   agentshield doctor                     Check the setup: runs every hook command the way the agent app does
   agentshield check [--json] [--profile <name>] <text>
@@ -29,7 +29,7 @@ Usage:
   agentshield mcp                        MCP server (stdio) with check_prompt and check_command, advice only
   agentshield hook <agent> [--capture <dir>]
                                          Called by the agent app's hooks (JSON on stdin). The message decides the agent:
-                                         claude, copilot (CLI, cloud agent, VS Code), cursor, windsurf, gemini
+                                         claude, copilot (CLI, cloud agent, VS Code), cursor, windsurf, gemini, antigravity
   agentshield --version
 `;
 
@@ -74,7 +74,7 @@ async function main(argv: string[]): Promise<HookOutput> {
   switch (command) {
     case "hook": {
       const agent = rest[0] ?? "";
-      const run = await runHook({ agent, raw: await readStdin(), captureDir: flag(rest, "--capture") ?? process.env.AGENTSHIELD_CAPTURE_DIR });
+      const run = await runHook({ agent, raw: await readStdin(), captureDir: flag(rest, "--capture") ?? process.env.AGENTSHIELD_CAPTURE_DIR, event: flag(rest, "--event") });
       return run.output;
     }
     case "check":

@@ -18,6 +18,8 @@ export interface HookRunOptions {
   raw: string;
   env?: NodeJS.ProcessEnv;
   captureDir?: string;
+  /** The event, when the agent's message does not name it (Antigravity): the hook entry says which one it is. */
+  event?: string;
   engine?: EngineContext;
   /** Send to the console and write the local log. Off for the server's own scripted runs. */
   telemetry?: boolean;
@@ -60,6 +62,7 @@ export async function runHook(opts: HookRunOptions): Promise<HookRun> {
     const parsed: unknown = JSON.parse(opts.raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("expected a JSON object");
     input = parsed as Record<string, unknown>;
+    if (opts.event && input.hook_event_name === undefined) input = { ...input, hook_event_name: opts.event };
   } catch (err) {
     return { output: { exitCode: 2, stderr: `AgentShield could not read the hook message, so the action is denied: ${message(err)}` } };
   }

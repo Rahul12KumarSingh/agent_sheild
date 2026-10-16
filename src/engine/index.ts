@@ -80,13 +80,13 @@ interface Ctx {
   diff?: (gate: GitGate) => string | undefined;
 }
 
-const CONTENT_KEYS = ["content", "contents", "new_string", "newString", "new_source", "new_str", "file_text", "text", "code_edit", "replacement", "insert_text"];
+const CONTENT_KEYS = ["content", "contents", "new_string", "newString", "new_source", "new_str", "file_text", "text", "code_edit", "replacement", "insert_text", "CodeContent", "ReplacementContent"];
 const PATCH_KEYS = ["patch", "input", "diff"];
 
 /** The text a write tool puts into files: new content, replacements, and the added lines of a patch. */
 function writtenContent(input: Record<string, unknown>): string {
   const parts: unknown[] = CONTENT_KEYS.map((k) => input[k]);
-  for (const list of [input.edits, input.replacements, input.changes]) {
+  for (const list of [input.edits, input.replacements, input.changes, input.ReplacementChunks]) {
     if (!Array.isArray(list)) continue;
     for (const item of list) {
       if (item && typeof item === "object") for (const k of CONTENT_KEYS) parts.push((item as Record<string, unknown>)[k]);

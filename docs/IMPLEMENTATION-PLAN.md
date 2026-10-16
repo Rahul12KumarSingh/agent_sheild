@@ -4,7 +4,7 @@
 >
 > **Written:** Thursday 2026-10-15. **Submission:** Saturday 2026-10-17. **Freeze:** Friday night.
 >
-> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested. P10, the hardening after the first runs on other machines, is done and tested too (1223 tests). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, a real session of each other agent app, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
+> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested. P10, the hardening after the first runs on other machines, is done and tested too (1244 tests). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, a real session of each other agent app, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
 >
 > **Reality check:** as of this morning the repository has only the guide. Wednesday's Gate 0 was not reached, so Phase 0 runs first today, and the schedule below is compressed by one day. The cut list at the end says what to drop if we slip further.
 
@@ -359,6 +359,7 @@ Evaluation table: done, see [EVALUATION.md](EVALUATION.md) (`npm run eval`). Sub
 | Poisoned commits and pull requests | Nothing looked at what was about to leave | Commit and PR guard, GIT-001 to GIT-005: `git commit`, `git add && git commit`, `commit -a`, `git push` and `gh pr create` get the diff scanned for a live secret, a secret file, a changed agent setup, a risky command added to a script or CI file, and hidden or agent-addressed text |
 | A broken policy file denied everything | Fail closed applied to the policy loader | Strict built-in fallback: risky actions denied with the reason, everyday work continues, `doctor` names the fix |
 | Only Claude Code and Copilot | Cursor, Windsurf and Gemini CLI missing | Adapters for their own message and answer shapes. Where an app cannot ask, the denial carries the exact `agentshield allow` command to run |
+| Gemini CLI is being replaced | Google moved unpaid and Google One users to Antigravity CLI on 2026-06-18; its hooks are a different format (`.agents/hooks.json`, camelCase payload with no event name, JSON decision on stdout, no prompt hook, no tool result) | An Antigravity adapter: each hook entry names its event (`hook antigravity --event PostToolUse`), blocks are `decision: deny`, asks are `force_ask`, its hook files are guardrails, and its tool names and argument keys are understood |
 | Blocks ignored in the VS Code agent chat on Windows | VS Code starts every hook as `powershell -Command <command>` there. PowerShell turns our exit code 2 into 1, VS Code reads that as a warning, and the call goes ahead. Found by reading the hook launcher in the bundled VS Code 1.139 and reproducing it | For VS Code's message shape a block is a JSON verdict on exit 0 (a prompt: `continue: false`). `doctor` starts the hook through PowerShell as well and judges every answer by that app's own rules |
 | A search could read secrets without asking | `grep_search` with `includePattern: ".env"` (VS Code) and `Grep` with `glob` (Claude Code) looked inside secret files through the search scope, which was not treated as a path | The search scope counts as a path, with glob matching for secret names (`.env*`, `*.pem`, `~/.aws/*`). A VS Code task's command (`create_and_run_task`) is judged like any shell command |
 
@@ -375,7 +376,7 @@ Evaluation table: done, see [EVALUATION.md](EVALUATION.md) (`npm run eval`). Sub
 - [x] The hook is started the way VS Code starts it (through PowerShell on Windows, a shell elsewhere) and VS Code's own rules are applied to the answer: everyday work goes ahead, a key in a command, an edit of the hook file and a `curl` of `.env` are denied, `cat .env` and a search of `.env*` ask, a key in a prompt stops the turn, non-ASCII text survives (`test/vscode-launch.test.ts`)
 - [x] A search scope that names secret files asks, an ordinary scope never does, and a task or `send_to_terminal` command meets the shell rules (`test/universal.test.ts`)
 - [x] Attack corpus 85 of 85, mutations 367 of 367, benign 0 of 100 blocked or asked, scenarios 10 of 10, hook p50 194 ms ([EVALUATION.md](EVALUATION.md))
-- [ ] A real session of Copilot CLI, Cursor, Windsurf and Gemini CLI with this build (they follow the vendors' documented formats so far)
+- [ ] A real session of Copilot CLI, Cursor, Windsurf, Gemini CLI and Antigravity CLI with this build (they follow the vendors' documented formats so far)
 - [ ] A live agent chat in VS Code with the hooks installed: record one blocked command and one ask
 - [ ] On the machine where "hook errored" appeared: pull, rebuild, run `agentshield init --agent all` and `agentshield doctor` in the repository, then retry the `.claude/settings.json` delete test in Claude Code and Copilot CLI
 

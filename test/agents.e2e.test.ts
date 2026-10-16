@@ -38,12 +38,15 @@ describe.skipIf(!existsSync(cli))("init writes hook files every agent app can ru
     const cursor = json(join(dir, ".cursor", "hooks.json")).hooks.beforeShellExecution[0];
     const windsurf = json(join(dir, ".windsurf", "hooks.json")).hooks.pre_run_command[0];
     const gemini = json(join(dir, ".gemini", "settings.json")).hooks.BeforeTool[0].hooks[0];
+    const antigravity = json(join(dir, ".agents", "hooks.json")).agentshield.PreToolUse[0].hooks[0];
+    const antigravityPost = json(join(dir, ".agents", "hooks.json")).agentshield.PostToolUse[0].hooks[0];
 
     // No exec form anywhere: a consumer that only reads `command` must get a complete command line.
-    for (const h of [claude, copilot, cursor, windsurf, gemini]) {
+    for (const h of [claude, copilot, cursor, windsurf, gemini, antigravity, antigravityPost]) {
       expect(h.args, JSON.stringify(h)).toBeUndefined();
-      expect(h.command).toMatch(/^node ".*cli\.js" hook (claude|copilot|cursor|windsurf|gemini)$/);
+      expect(h.command).toMatch(/^node ".*cli\.js" hook (claude|copilot|cursor|windsurf|gemini|antigravity)( --event PostToolUse)?$/);
     }
+    expect(antigravityPost.command).toContain("--event PostToolUse");
     expect(cursor.failClosed).toBe(true);
     expect(claude.onFailure).toBe("block");
 
@@ -56,6 +59,7 @@ describe.skipIf(!existsSync(cli))("init writes hook files every agent app can ru
       [cursor.command, "cursor", "cursor", (c, s) => ({ hook_event_name: "beforeShellExecution", conversation_id: s, command: c, cwd: dir })],
       [windsurf.command, "windsurf", "windsurf", (c, s) => ({ agent_action_name: "pre_run_command", trajectory_id: s, tool_info: { command_line: c, cwd: dir } })],
       [gemini.command, "gemini", "gemini", (c, s) => ({ hook_event_name: "BeforeTool", session_id: s, cwd: dir, tool_name: "run_shell_command", tool_input: { command: c } })],
+      [antigravity.command, "antigravity", "antigravity", (c, s) => ({ conversationId: s, workspacePaths: [dir], toolCall: { name: "run_command", args: { CommandLine: c, Cwd: dir } }, stepIdx: 1 })],
     ];
     for (const [command, name, host, payload] of cases) {
       const ok = runLikeTheApp(command, payload("git status --short", `${name}-ok`), dir, home);
@@ -81,6 +85,7 @@ describe.skipIf(!existsSync(cli))("init writes hook files every agent app can ru
     expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe("lint.sh");
     expect(existsSync(join(dir, ".github", "hooks", "agentshield.json"))).toBe(false);
     expect(json(join(dir, ".cursor", "hooks.json")).hooks).toBeUndefined();
+    expect(json(join(dir, ".agents", "hooks.json")).agentshield).toBeUndefined();
   });
 
   it("doctor runs every installed hook for real and is green", () => {
@@ -93,6 +98,7 @@ describe.skipIf(!existsSync(cli))("init writes hook files every agent app can ru
     expect(doctor.stdout).toContain("beforeShellExecution hook runs and decides (Cursor)");
     expect(doctor.stdout).toContain("pre_run_command hook runs and decides (Windsurf)");
     expect(doctor.stdout).toContain("BeforeTool hook runs and decides (Gemini CLI)");
+    expect(doctor.stdout).toContain("PreToolUse hook runs and decides (Antigravity CLI)");
     expect(doctor.stdout).not.toContain("[FAIL]");
     expect(doctor.status).toBe(0);
   });

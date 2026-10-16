@@ -384,7 +384,7 @@ const READERS = new Set([
 ]);
 
 const GUARDRAIL_MENTION =
-  /\.claude[\\/](?:settings(?:\.local)?\.json|plugins)|\.claude\.json|managed-settings\.json|\.cursor[\\/]hooks\.json|\.github[\\/](?:hooks|copilot[\\/]settings)|\.copilot[\\/](?:hooks|settings\.json|config\.json)|\.(?:windsurf|devin)[\\/]hooks\.json|\.codeium[\\/](?:windsurf[\\/])?hooks\.json|\.gemini[\\/]settings\.json|\.codex[\\/](?:hooks\.json|config\.toml)|\.agentshield\b/i;
+  /\.claude[\\/](?:settings(?:\.local)?\.json|plugins)|\.claude\.json|managed-settings\.json|\.cursor[\\/]hooks\.json|\.github[\\/](?:hooks|copilot[\\/]settings)|\.copilot[\\/](?:hooks|settings\.json|config\.json)|\.(?:windsurf|devin)[\\/]hooks\.json|\.codeium[\\/](?:windsurf[\\/])?hooks\.json|\.gemini[\\/]settings\.json|\.agents[\\/]hooks\.json|\.gemini[\\/](?:config[\\/]hooks\.json|antigravity(?:-cli|-ide)?[\\/]settings\.json)|\.codex[\\/](?:hooks\.json|config\.toml)|\.agentshield\b/i;
 
 function writeTargets(s: Segment): string[] {
   const targets = [...s.redirectsOut];

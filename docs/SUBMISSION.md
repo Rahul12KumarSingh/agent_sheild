@@ -23,7 +23,7 @@ AgentShield is a policy checkpoint for AI coding agents. It checks every prompt,
 
 ## Brief description (about 200 words)
 
-AI coding agents follow instructions wherever they find them, including in a README or web page written by an attacker. AgentShield sits in the agent app's own hooks (Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini CLI, or any MCP client) and checks three things: what the user asks, what the agent is about to do, and what it just read. A pure-code engine with 53 rules undoes disguised commands, finds live secrets and personal data (card, PAN, Aadhaar), and returns a transparent score, a reason and a safe alternative in about 0.1 ms. It stays out of the way of everyday work: reading and searching code is never held up, a person approves a sensitive action once and AgentShield remembers, and a commit or pull request is checked before it leaves.
+AI coding agents follow instructions wherever they find them, including in a README or web page written by an attacker. AgentShield sits in the agent app's own hooks (Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini CLI, Antigravity CLI, or any MCP client) and checks three things: what the user asks, what the agent is about to do, and what it just read. A pure-code engine with 53 rules undoes disguised commands, finds live secrets and personal data (card, PAN, Aadhaar), and returns a transparent score, a reason and a safe alternative in about 0.1 ms. It stays out of the way of everyday work: reading and searching code is never held up, a person approves a sensitive action once and AgentShield remembers, and a commit or pull request is checked before it leaves.
 
 Its key idea is the **Rule of Two**: a session may hold a stranger's text, sensitive data, or an outside action, but never all three. When they meet, the action is blocked, however innocent it looks. That stops exfiltration that pattern detectors miss.
 
@@ -51,7 +51,7 @@ The console runs on **Google Cloud Run**: a live feed, a replay of the full atta
 | Engine decision time | about 0.1 ms (p95) | EVALUATION.md |
 | Hook end to end, as the agent app sees it | p95 221 ms (p50 194 ms) on a Windows laptop, about 140 ms of it Node start-up | EVALUATION.md |
 | Rules | 53, every one with a positive and a negative test | `test/engine-rules.test.ts` |
-| Tests | 1223 | `npm test` |
+| Tests | 1244 | `npm test` |
 
 Always say "on our own test set". Never quote the console's seeded counters as real usage.
 
@@ -64,7 +64,7 @@ Always say "on our own test set". Never quote the console's seeded counters as r
 5. **Live demo or screenshot.** The S1 replay: three gates, the A/B/C meter, the red alert, the split view.
 6. **Coach, not cop.** Every block has a reason and a safe alternative. Prompt Coach with a Gemini rewrite re-checked by the engine.
 7. **Company control.** Four layers, strictest wins, locked rules. Same `cat .env`: developer gets ASK, intern gets BLOCK. Monitor mode for pilots. Fails closed.
-8. **Architecture.** Agent app hooks (Claude Code, Copilot, Cursor, Windsurf, Gemini CLI, MCP) → pure-code engine on the laptop (policy, session memory) → redacted events → Cloud Run console → Gemini on Vertex AI (raise-only).
+8. **Architecture.** Agent app hooks (Claude Code, Copilot, Cursor, Windsurf, Gemini CLI, Antigravity CLI, MCP) → pure-code engine on the laptop (policy, session memory) → redacted events → Cloud Run console → Gemini on Vertex AI (raise-only).
 9. **Evaluation.** The numbers table above, with "our own test set" on the slide.
 10. **Honest limits and next steps.** We do not catch every injection, hooks are not a sandbox, images are not scanned. Next: central policy server, managed-settings rollout, recorded real sessions in every supported agent app.
 
