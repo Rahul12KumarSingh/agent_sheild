@@ -214,7 +214,7 @@ All six are tests in `test/session.test.ts` and `test/server.test.ts`. Rule ids:
   - [x] Asking it to edit `.claude/settings.json` → blocked (S7) (2026-10-15, P1 build, file unchanged)
   - [ ] A normal coding task → no prompts and no blocks
 - [x] Killing the engine mid-run (simulate a throw) → denied, not allowed (`test/hook.test.ts`)
-- [ ] Hook end-to-end p95 under 150 ms measured over 100 calls. Record the number. **Windows laptop, final build: p50 164 ms, p95 187 ms, of which Node start-up alone is 115 ms** (AgentShield's own share is about 40 to 70 ms). macOS with the P1 build: p95 29 ms. Recheck on macOS with `npm run bench`
+- [ ] Hook end-to-end p95 under 150 ms measured over 100 calls. Record the number. **Windows laptop, final build: p50 163 ms, p95 180 ms, of which Node start-up alone is 115 ms** (AgentShield's own share is about 50 to 65 ms). macOS with the P1 build: p95 29 ms. Recheck on macOS with `npm run bench`
 - [ ] A teammate who did not write the code installs from the README alone and gets `doctor` all green
 - [x] Console down → hook decisions unchanged, event in the local log (`test/hook.test.ts`)
 

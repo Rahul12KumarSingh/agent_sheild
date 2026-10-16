@@ -1,6 +1,6 @@
 # AgentShield evaluation
 
-Measured on 2026-10-16 at commit `3156b8b` (Node 22.13.1, win32 10.0.26200 x64). Regenerate with `npm run build && npm run eval`.
+Measured on 2026-10-16 at commit `7a145f2` (Node 22.13.1, win32 10.0.26200 x64). Regenerate with `npm run build && npm run eval`.
 
 These numbers are for **our own test set**, written by the team. They are not a claim about unseen attacks. The Rule of Two exists because detection will miss things.
 
@@ -11,8 +11,8 @@ These numbers are for **our own test set**, written by the team. They are not a 
 | Benign corpus: blocks | **0 / 60** (must be 0) |
 | Benign corpus: asks | **0 / 60** (must be 0) |
 | Scenarios S1 to S10 matching their expected result | **10 / 10** (asserted in `test/server.test.ts`) |
-| Engine latency, in process | p50 0.04 ms, p95 0.09 ms over 3600 evaluations |
-| Hook end to end, spawned like an agent app | p50 164 ms, p95 187 ms (of which Node start-up alone: 115 ms on this machine) |
+| Engine latency, in process | p50 0.04 ms, p95 0.11 ms over 3600 evaluations |
+| Hook end to end, spawned like an agent app | p50 163 ms, p95 180 ms (of which Node start-up alone: 115 ms on this machine) |
 
 ## Attack corpus by category (top finding)
 
