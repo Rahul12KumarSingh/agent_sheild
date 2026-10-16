@@ -25,7 +25,8 @@
     "eval": "node scripts/eval.mjs",
     "smoke": "node scripts/smoke.mjs",
     "deploy": "node scripts/deploy.mjs",
-    "rollback": "node scripts/rollback.mjs"
+    "rollback": "node scripts/rollback.mjs",
+    "attacker": "node scripts/fake-attacker.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
