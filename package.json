@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p console",
     "record": "node scripts/record.mjs",
     "bench": "node scripts/bench-hook.mjs",
+    "eval": "node scripts/eval.mjs",
     "smoke": "node scripts/smoke.mjs",
     "deploy": "node scripts/deploy.mjs",
     "rollback": "node scripts/rollback.mjs"

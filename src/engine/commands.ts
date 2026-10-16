@@ -98,6 +98,10 @@ export function parseSegments(text: string, depth = 0): Segment[] {
         for (const s of parseSegments(args.slice(i + 1).join(" "), depth + 1)) {
           result.push({ ...s, wrappers: [...wrappers, ...s.wrappers] });
         }
+        // A redirect written after the quoted command belongs to the wrapper: keep it.
+        if (redirectsOut.length || redirectsIn.length) {
+          result.push({ cmd: "", word: "", args: [], positional: [], redirectsOut, redirectsIn, wrappers, text: part.trim() });
+        }
         continue;
       }
     }
