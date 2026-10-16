@@ -55,8 +55,10 @@ export function formatGemini(decision: Decision, event: ShieldEvent, opts: Forma
   const coach = opts.coach ?? "always";
   const outcome = outcomeOf(decision, event, false);
   if (event.kind !== "result") {
-    if (outcome === "block") return { exitCode: 2, stderr: denyMessage(decision, event, coach) };
-    if (outcome === "needs-approval" || outcome === "ask") return { exitCode: 2, stderr: needsApprovalMessage(decision, event, opts) };
+    // Exit 0 with a deny verdict is the documented way; exit 2 would be lost if the app starts hooks through PowerShell on Windows.
+    const deny = (reason: string): HookOutput => ({ exitCode: 0, stdout: JSON.stringify({ decision: "deny", reason }) });
+    if (outcome === "block") return deny(denyMessage(decision, event, coach));
+    if (outcome === "needs-approval" || outcome === "ask") return deny(needsApprovalMessage(decision, event, opts));
     return { exitCode: 0 };
   }
   if (outcome === "note" && decision.findings.length > 0) {

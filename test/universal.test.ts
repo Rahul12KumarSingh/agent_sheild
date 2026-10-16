@@ -200,8 +200,12 @@ describe("one engine, every agent: the same attacks stop, the same everyday work
       const { agent, payload } = shape(t, a);
       return hook(agent, payload);
     };
-    // VS Code is blocked by a JSON verdict on exit 0: on Windows it starts hooks through PowerShell, which turns exit 2 into 1.
+    // VS Code and Gemini CLI are blocked by a JSON verdict on exit 0: on Windows an app may start hooks through PowerShell, which turns exit 2 into 1.
     const expectBlocked = (out: Awaited<ReturnType<typeof hook>>, prompt = false) => {
+      if (name === "gemini") {
+        expect(out.exitCode).toBe(0);
+        return expect(JSON.parse(out.stdout!)).toMatchObject({ decision: "deny", reason: expect.any(String) });
+      }
       if (name !== "vscode") return expect(out.exitCode).toBe(2);
       expect(out.exitCode).toBe(0);
       const json = JSON.parse(out.stdout!);
@@ -230,7 +234,7 @@ describe("one engine, every agent: the same attacks stop, the same everyday work
       const out = await go("readEnv");
       const text = `${out.stdout ?? ""}${out.stderr ?? ""}`;
       expect(text).toContain("SEC-004");
-      if (out.exitCode === 2) expect(text).toContain("agentshield allow SEC-004");
+      if (out.exitCode === 2 || name === "gemini") expect(text).toContain("agentshield allow SEC-004");
       else expect(text).toContain("ask");
     });
 
