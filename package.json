@@ -1,6 +1,6 @@
 {
   "name": "agentshield",
-  "version": "0.0.1",
+  "version": "0.9.0",
   "description": "A policy checkpoint for AI coding agents: checks every prompt and action, blocks the dangerous ones, suggests safe alternatives.",
   "type": "module",
   "license": "MIT",
@@ -22,7 +22,9 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p console",
     "record": "node scripts/record.mjs",
     "bench": "node scripts/bench-hook.mjs",
-    "deploy": "node scripts/deploy.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "rollback": "node scripts/rollback.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
