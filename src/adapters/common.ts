@@ -19,9 +19,15 @@ export function denyMessage(d: Decision, event: ShieldEvent, coach: FormatOption
 export function askMessage(d: Decision, opts: FormatOptions = {}): string {
   const coach = opts.coach ?? "always";
   const tip = coach === "always" && d.safeAlternative ? ` Safer option: ${d.safeAlternative}` : "";
-  const remembered = opts.approvals !== false && (d.asks ?? []).length > 0 && (d.asks ?? []).every((a) => a.rememberable);
+  const mode = opts.approvals ?? "saved";
+  const asks = d.asks ?? [];
+  const allRemember = asks.length > 0 && asks.every((a) => a.rememberable);
+  // A yes in the app's prompt is once. Staying quiet needs a step AgentShield can see: a saved approval, or the opt-in session mode.
+  const remembered = !allRemember || mode === "off" ? "" : mode === "session"
+    ? " If you approve, AgentShield will not ask again for this in this session."
+    : ` Allowing once asks again next time. To stop asking for good, run: ${asks.slice(0, 3).map(approveCommand).join(" ; ")}`;
   const rules = rulesOf(d);
-  return `AgentShield${rules ? ` [${d.level} ${rules}]` : ""}: ${d.reason}.${tip}${remembered ? " If you approve, AgentShield will not ask again for this in this session." : ""}`;
+  return `AgentShield${rules ? ` [${d.level} ${rules}]` : ""}: ${d.reason}.${tip}${remembered}`;
 }
 
 const quote = (s: string) => `"${s.replace(/"/g, '\\"')}"`;
@@ -37,7 +43,7 @@ export function needsApprovalMessage(d: Decision, event: ShieldEvent, opts: Form
   const rules = rulesOf(d);
   const lines = [`AgentShield needs a person's approval for this ${event.kind === "prompt" ? "prompt" : "action"} [${d.level} ${d.score}${rules ? ` ${rules}` : ""}]: ${d.reason}`];
   const asks = d.asks ?? [];
-  const approvable = opts.approvals !== false ? asks.filter((a) => a.rememberable).slice(0, 3) : [];
+  const approvable = opts.approvals !== "off" ? asks.filter((a) => a.rememberable).slice(0, 3) : [];
   if (approvable.length > 0 && approvable.length === asks.length) {
     lines.push("This app cannot ask the user itself. Stop, tell the user what you need and why, and let them approve it from their own terminal:");
     for (const a of approvable) lines.push(`  ${approveCommand(a)}`);

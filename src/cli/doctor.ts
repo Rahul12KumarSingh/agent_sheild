@@ -242,10 +242,10 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
   }
 
   // Policy
-  let approvalsOn = true;
+  let approvalsMode: string = "saved";
   try {
     const p = await loadPolicyAsync({ cwd: opts.cwd, env: opts.env });
-    approvalsOn = p.settings.approvals !== "off";
+    approvalsMode = p.settings.approvals;
     add("ok", `Policy loads: ${p.name}, mode ${p.mode.toUpperCase()}, profile ${p.profile}`);
     if (p.mode === "monitor") add("warn", "Monitor mode: nothing is blocked, events are only logged");
     for (const w of p.warnings) add("warn", `Policy: ${w}`);
@@ -276,7 +276,8 @@ export async function doctorCommand(opts: { cwd: string; env: NodeJS.ProcessEnv;
 
   // Approvals
   const approvals = listApprovals(userDir(opts.env), opts.cwd);
-  add("ok", `Approvals: ${approvalsOn ? "an approved ask is remembered for the session" : "off (every ask is asked every time)"}${approvals.length ? `; ${approvals.length} saved for this project (agentshield approvals)` : ""}`);
+  const modeText = approvalsMode === "off" ? "off (every ask is asked every time)" : approvalsMode === "session" ? "a yes is remembered for the session, and agentshield allow saves one" : "a yes in the agent's prompt is once (asked again next time); agentshield allow saves an approval";
+  add("ok", `Approvals: ${modeText}${approvals.length ? `; ${approvals.length} saved for this project (agentshield approvals)` : ""}`);
 
   // Claude Code version
   const res = spawnSync("claude", ["--version"], { encoding: "utf8", shell: process.platform === "win32", timeout: 8000 });

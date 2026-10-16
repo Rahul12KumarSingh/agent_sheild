@@ -100,7 +100,7 @@ export async function runHook(opts: HookRunOptions): Promise<HookRun> {
       duplicate,
     });
     saveSession(stateDir, outcome.session!);
-    const output = adapter.format(outcome.decision, event, { coach: policy.settings.coach_messages, approvals: policy.settings.approvals !== "off" });
+    const output = adapter.format(outcome.decision, event, { coach: policy.settings.coach_messages, approvals: policy.settings.approvals });
     if (degraded && output.exitCode === 2 && output.stderr) {
       output.stderr += `\nAgentShield is using its built-in rules because a policy file could not be loaded (${degraded}). Run \`agentshield doctor\`.`;
     }

@@ -26,7 +26,7 @@ export const BUILTIN: PolicyFile = {
   mild_notes: "on",
   coach_messages: "always",
   outside_reads: "allow",
-  approvals: "session",
+  approvals: "saved",
   allow_test_data: false,
   circuit_breaker: 3,
   allowed_hosts: [

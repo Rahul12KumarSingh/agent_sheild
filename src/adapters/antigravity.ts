@@ -47,7 +47,7 @@ export function formatAntigravity(decision: Decision, event: ShieldEvent, opts: 
   if (outcome === "ask" || outcome === "needs-approval") {
     const asks = decision.asks ?? [];
     const appMayRemember = asks.length > 0 && asks.every((a) => a.rememberable);
-    return say(appMayRemember ? "ask" : "force_ask", askMessage(decision, { ...opts, approvals: false }));
+    return say(appMayRemember ? "ask" : "force_ask", askMessage(decision, { ...opts, approvals: "off" }));
   }
   // "allow" hands the call on to the app's own permission rules: AgentShield never approves.
   return say("allow");

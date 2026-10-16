@@ -51,7 +51,7 @@ The console runs on **Google Cloud Run**: a live feed, a replay of the full atta
 | Engine decision time | about 0.1 ms (p95) | EVALUATION.md |
 | Hook end to end, as the agent app sees it | p95 221 ms (p50 194 ms) on a Windows laptop, about 140 ms of it Node start-up | EVALUATION.md |
 | Rules | 53, every one with a positive and a negative test | `test/engine-rules.test.ts` |
-| Tests | 1244 | `npm test` |
+| Tests | 1248 | `npm test` |
 
 Always say "on our own test set". Never quote the console's seeded counters as real usage.
 

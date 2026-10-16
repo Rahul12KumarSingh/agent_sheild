@@ -9,8 +9,8 @@ export interface HookOutput {
 export interface FormatOptions {
   /** When the safer alternative is shown: always, only on a block, or never (an action block still tells the model). */
   coach?: "always" | "on_block" | "off";
-  /** Whether an approved ask is remembered (policy `approvals`). Changes what the ask message promises. */
-  approvals?: boolean;
+  /** What is remembered after a yes (policy `approvals`). Changes what the ask message promises. */
+  approvals?: "session" | "saved" | "off";
 }
 
 /** One adapter per agent app: its hook format in, its hook format out. The engine never changes. */

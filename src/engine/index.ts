@@ -289,9 +289,10 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   // the Rule of Two or the circuit breaker, and the findings (and so the session legs) stay as they were.
   // Not for an app whose own prompt remembers "Always allow": a hook cannot see which button was pressed, so the app keeps the memory.
   const appRemembers = APPS_THAT_REMEMBER.has(event.agent);
+  const rememberYes = settings.approvals === "session" && !appRemembers;
   let approved = false;
   if (action === "ask" && event.kind === "action" && !ruleOfTwo && !breaker && settings.approvals !== "off") {
-    const lookup: ApprovedLookup = (rule, target) => (!appRemembers && Boolean(session?.approved?.[approvalId(rule, target)])) || Boolean(opts.approved?.(rule, target));
+    const lookup: ApprovedLookup = (rule, target) => (settings.approvals === "session" && !appRemembers && Boolean(session?.approved?.[approvalId(rule, target)])) || Boolean(opts.approved?.(rule, target));
     if (allCovered(findings, lookup)) {
       action = "note";
       approved = true;
@@ -334,10 +335,10 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   if (next && event.kind !== "prompt") {
     const sigs = eventSigs(event);
     // An action we asked about ran, so a person said yes: remember it. An ask is remembered until its result arrives.
-    if (event.kind === "result") next = appRemembers ? next : promote(next, sigs);
+    if (event.kind === "result") next = rememberYes ? promote(next, sigs) : next;
     else {
       next = { ...next, last: { sig: eventSig(event), at: Date.now() } };
-      if (decision.action === "ask" && decision.asks?.length && !appRemembers) next = recordPending(next, sigs, decision.asks);
+      if (decision.action === "ask" && decision.asks?.length && rememberYes) next = recordPending(next, sigs, decision.asks);
     }
   }
   const A = next ? next.legs.A?.why : legs.A;

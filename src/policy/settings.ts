@@ -13,8 +13,8 @@ export interface Settings {
   coach_messages: "always" | "on_block" | "off";
   /** Reads outside the project folder: allowed, or asked (contractor posture). */
   outside_reads: "allow" | "ask";
-  /** Whether an approved ask is remembered for the rest of the session (and by `agentshield allow`), or asked every time. */
-  approvals: "session" | "off";
+  /** What is remembered after a yes in the agent's prompt: nothing but an explicit `agentshield allow` (saved), also the session (session), or nothing at all (off). */
+  approvals: "session" | "saved" | "off";
   /** Known test data (test card numbers) is not flagged. Tester profile. */
   allow_test_data: boolean;
   /** Blocks in one session before everything except read-only tools is stopped. */
@@ -48,7 +48,7 @@ export const SPEC: Record<SettingKey, Spec> = {
   mild_notes: { type: "enum", order: ["off", "on"] },
   coach_messages: { type: "enum", order: ["off", "on_block", "always"] },
   outside_reads: { type: "enum", order: ["allow", "ask"] },
-  approvals: { type: "enum", order: ["session", "off"] },
+  approvals: { type: "enum", order: ["session", "saved", "off"] },
   allow_test_data: { type: "bool", strict: false },
   circuit_breaker: { type: "number", min: 1, max: 20 },
   allowed_hosts: { type: "list", add: "loosen" },
@@ -67,7 +67,7 @@ export const DESCRIPTIONS: Record<SettingKey, string> = {
   mild_notes: "Show small notes for MILD findings",
   coach_messages: "When to show the safer alternative: always, only on a block, or off",
   outside_reads: "Reading files outside the project folder: allow, or ask first",
-  approvals: "When a person approves an ask, remember it for the session (session) or ask every time (off)",
+  approvals: "A yes in the agent's own prompt means once, and it is asked again next time. saved: only an approval saved with agentshield allow is remembered. session: a yes is also remembered for the session. off: nothing is remembered",
   allow_test_data: "Known test data (for example test card numbers) is not flagged",
   circuit_breaker: "Blocks in one session before only read-only tools are allowed",
   allowed_hosts: "Hosts that are not an outside action for the Rule of Two",

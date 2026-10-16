@@ -21,11 +21,66 @@ const sandbox = () => {
 const claude = (session: string, phase: "PreToolUse" | "PostToolUse", id: string, tool: string, input: Record<string, unknown>, cwd = POSIX_CWD) =>
   JSON.stringify({ hook_event_name: phase, session_id: session, cwd, tool_name: tool, tool_input: input, tool_use_id: id, ...(phase === "PostToolUse" ? { tool_response: "ok" } : {}) });
 
-describe("allow once, allow similar: a person's yes is remembered for the session", () => {
+/** The opt-in mode: a yes in the app's prompt is also remembered for the session. */
+const remember = mergePolicy({ user: { approvals: "session" } });
+
+describe("by default a yes in the app's prompt is once, the same in every app", () => {
+  const asked = (out: { stdout?: string }) => out.stdout ?? "";
+
+  it("Claude Code, Cursor, Copilot CLI and VS Code ask again after a yes, and say how to stop for good", async () => {
+    const { env } = sandbox();
+    const claudeGo = (phase: "PreToolUse" | "PostToolUse", id: string) => runHook({ agent: "claude", raw: claude("once", phase, id, "Bash", { command: "cat .env" }), env, engine: POSIX, telemetry: false });
+    const first = await claudeGo("PreToolUse", "o1");
+    expect(first.decision?.action).toBe("ask");
+    expect(asked(first.output)).toContain("agentshield allow SEC-004 ");
+    expect(asked(first.output)).toContain("asks again next time");
+    await claudeGo("PostToolUse", "o1");
+    expect((await claudeGo("PreToolUse", "o2")).decision?.action).toBe("ask");
+
+    const cursor = (payload: Record<string, unknown>) => runHook({ agent: "cursor", raw: JSON.stringify({ conversation_id: "cur-once", ...payload }), env, engine: POSIX, telemetry: false });
+    await cursor({ hook_event_name: "beforeShellExecution", command: "cat .env", cwd: POSIX_CWD });
+    await cursor({ hook_event_name: "postToolUse", tool_name: "Shell", tool_input: { command: "cat .env" }, tool_output: "{}", tool_use_id: "t1", cwd: POSIX_CWD });
+    expect(JSON.parse((await cursor({ hook_event_name: "beforeShellExecution", command: "cat .env", cwd: POSIX_CWD })).output.stdout!).permission).toBe("ask");
+
+    const cli = (extra: Record<string, unknown>) => runHook({ agent: "copilot", raw: JSON.stringify({ sessionId: "cop-once", timestamp: 1760000000000, cwd: POSIX_CWD, toolName: "view", toolArgs: { path: `${POSIX_CWD}/.env` }, ...extra }), env, engine: POSIX, telemetry: false });
+    await cli({});
+    await cli({ toolResult: { resultType: "success", textResultForLlm: "A=1" } });
+    expect((await cli({})).decision?.action).toBe("ask");
+
+    const vscode = (event: string, extra: Record<string, unknown> = {}) =>
+      runHook({ agent: "copilot", raw: JSON.stringify({ hook_event_name: event, timestamp: "2026-10-16T08:00:00Z", session_id: "vsc-once", cwd: POSIX_CWD, tool_use_id: "v1", tool_name: "run_in_terminal", tool_input: { command: "cat .env" }, ...extra }), env, engine: POSIX, telemetry: false });
+    await vscode("PreToolUse");
+    await vscode("PostToolUse", { tool_response: "ok" });
+    const again = await vscode("PreToolUse", { tool_use_id: "v2" });
+    expect(again.decision?.action).toBe("ask");
+    expect(JSON.parse(again.output.stdout!).hookSpecificOutput.permissionDecision).toBe("ask");
+  });
+
+  it("Always allow is a step AgentShield can see: once saved, every app stops asking", async () => {
+    const { env } = sandbox();
+    const dir = mkdtempSync(join(root, "always-"));
+    mkdirSync(join(dir, ".git"));
+    expect((await allowCommand(["SEC-004", ".env"], { cwd: dir, env })).exitCode).toBe(0);
+    const vscode = runHook({ agent: "copilot", raw: JSON.stringify({ hook_event_name: "PreToolUse", timestamp: "2026-10-16T08:00:00Z", session_id: "vsc-always", cwd: dir, tool_use_id: "a", tool_name: "run_in_terminal", tool_input: { command: "cat .env" } }), env, telemetry: false });
+    expect((await vscode).decision).toMatchObject({ action: "note", approved: true });
+    const cursor = runHook({ agent: "cursor", raw: JSON.stringify({ conversation_id: "cur-always", hook_event_name: "beforeShellExecution", command: "cat .env", cwd: dir }), env, telemetry: false });
+    expect((await cursor).output.stdout).toBe('{"permission":"allow"}');
+  });
+
+  it("Antigravity leaves it to its own buttons: Allow once asks again, and AgentShield remembers nothing", async () => {
+    const { env } = sandbox();
+    const ag = (event?: string) => runHook({ agent: "antigravity", raw: JSON.stringify({ conversationId: "ag-once", workspacePaths: [POSIX_CWD], toolCall: { name: "view_file", args: { AbsolutePath: `${POSIX_CWD}/.env` } } }), event, env, engine: POSIX, telemetry: false, policy: remember });
+    expect(JSON.parse((await ag()).output.stdout!).decision).toBe("ask");
+    await ag("PostToolUse");
+    expect(JSON.parse((await ag()).output.stdout!).decision).toBe("ask");
+  });
+});
+
+describe("opt-in session memory: a person's yes is remembered for the session", () => {
   it("asks once for a secret file, then notes it, for the same file whatever the tool", async () => {
     const { env } = sandbox();
     const go = (phase: "PreToolUse" | "PostToolUse", id: string, tool: string, input: Record<string, unknown>) =>
-      runHook({ agent: "claude", raw: claude("sess", phase, id, tool, input), env, engine: POSIX, telemetry: false });
+      runHook({ agent: "claude", raw: claude("sess", phase, id, tool, input), env, engine: POSIX, telemetry: false, policy: remember });
 
     const first = await go("PreToolUse", "a1", "Bash", { command: "cat .env" });
     expect(JSON.parse(first.output.stdout!).hookSpecificOutput.permissionDecision).toBe("ask");
@@ -100,7 +155,7 @@ describe("allow once, allow similar: a person's yes is remembered for the sessio
   it("two sessions do not share approvals", async () => {
     const { env } = sandbox();
     const go = (session: string, phase: "PreToolUse" | "PostToolUse", id: string) =>
-      runHook({ agent: "claude", raw: claude(session, phase, id, "Bash", { command: "cat .env" }), env, engine: POSIX, telemetry: false });
+      runHook({ agent: "claude", raw: claude(session, phase, id, "Bash", { command: "cat .env" }), env, engine: POSIX, telemetry: false, policy: remember });
     await go("one", "PreToolUse", "x1");
     await go("one", "PostToolUse", "x1");
     expect((await go("one", "PreToolUse", "x2")).decision?.approved).toBe(true);
@@ -108,10 +163,10 @@ describe("allow once, allow similar: a person's yes is remembered for the sessio
   });
 });
 
-describe("the same approval memory works in every app that can ask", () => {
+describe("opt-in session memory works in every app that can ask", () => {
   it("Cursor: asked in beforeShellExecution, reported in postToolUse with other fields", async () => {
     const { env } = sandbox();
-    const go = (payload: Record<string, unknown>) => runHook({ agent: "cursor", raw: JSON.stringify({ conversation_id: "cur1", ...payload }), env, engine: POSIX, telemetry: false });
+    const go = (payload: Record<string, unknown>) => runHook({ agent: "cursor", raw: JSON.stringify({ conversation_id: "cur1", ...payload }), env, engine: POSIX, telemetry: false, policy: remember });
     const asked = await go({ hook_event_name: "beforeShellExecution", command: "cat .env", cwd: POSIX_CWD });
     expect(JSON.parse(asked.output.stdout!).permission).toBe("ask");
     await go({ hook_event_name: "postToolUse", tool_name: "Shell", tool_input: { command: "cat .env", working_directory: POSIX_CWD }, tool_output: "{\"exitCode\":0}", tool_use_id: "tu1", cwd: POSIX_CWD });
@@ -122,7 +177,7 @@ describe("the same approval memory works in every app that can ask", () => {
 
   it("Copilot CLI (no tool ids): the call itself is the key", async () => {
     const { env } = sandbox();
-    const go = (extra: Record<string, unknown>) => runHook({ agent: "copilot", raw: JSON.stringify({ sessionId: "cop1", timestamp: 1760000000000, cwd: POSIX_CWD, toolName: "view", toolArgs: { path: `${POSIX_CWD}/.env` }, ...extra }), env, engine: POSIX, telemetry: false });
+    const go = (extra: Record<string, unknown>) => runHook({ agent: "copilot", raw: JSON.stringify({ sessionId: "cop1", timestamp: 1760000000000, cwd: POSIX_CWD, toolName: "view", toolArgs: { path: `${POSIX_CWD}/.env` }, ...extra }), env, engine: POSIX, telemetry: false, policy: remember });
     expect(JSON.parse((await go({})).output.stdout!).permissionDecision).toBe("ask");
     await go({ toolResult: { resultType: "success", textResultForLlm: "A=1" } });
     expect((await go({})).decision?.approved).toBe(true);
@@ -131,7 +186,7 @@ describe("the same approval memory works in every app that can ask", () => {
   it("VS Code: asked with one tool id, reported with the same one", async () => {
     const { env } = sandbox();
     const go = (event: string, extra: Record<string, unknown>) =>
-      runHook({ agent: "copilot", raw: JSON.stringify({ hook_event_name: event, timestamp: "2026-10-16T08:00:00Z", session_id: "vsc1", cwd: POSIX_CWD, tool_use_id: "v1", tool_name: "run_in_terminal", tool_input: { command: "cat .env" }, ...extra }), env, engine: POSIX, telemetry: false });
+      runHook({ agent: "copilot", raw: JSON.stringify({ hook_event_name: event, timestamp: "2026-10-16T08:00:00Z", session_id: "vsc1", cwd: POSIX_CWD, tool_use_id: "v1", tool_name: "run_in_terminal", tool_input: { command: "cat .env" }, ...extra }), env, engine: POSIX, telemetry: false, policy: remember });
     expect((await go("PreToolUse", {})).decision?.action).toBe("ask");
     await go("PostToolUse", { tool_response: "ok" });
     expect((await go("PreToolUse", { tool_use_id: "v2" })).decision?.approved).toBe(true);

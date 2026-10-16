@@ -80,6 +80,6 @@ export function approvalsCommand(args: string[], opts: { cwd: string; env: NodeJ
     return removed ? { exitCode: 0, stdout: `Removed ${removed} approval${removed === 1 ? "" : "s"}.` } : { exitCode: 1, stderr: "No such approval. Run `agentshield approvals` to see the list." };
   }
   const list = listApprovals(stateDir, opts.cwd);
-  if (list.length === 0) return { exitCode: 0, stdout: "No saved approvals for this project. (An ask you approve in the agent's own prompt is remembered for that session only.)" };
+  if (list.length === 0) return { exitCode: 0, stdout: "No saved approvals for this project. (Allowing once in the agent's own prompt is not saved: it asks again next time. Save one with agentshield allow.)" };
   return { exitCode: 0, stdout: ["Approved for this project:", ...list.map((a, i) => `  ${i + 1}. ${a.rule}  ${a.target}   (${a.at.slice(0, 10)})`)].join("\n") };
 }
