@@ -10,3 +10,5 @@ coverage/
 .idea/shelf/
 # raw hook captures before review; reviewed ones go to test/fixtures/
 captures/
+# built by `npm run build` (a copy of dist/cli.js)
+plugin/runtime/

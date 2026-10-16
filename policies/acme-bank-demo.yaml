@@ -1,0 +1,72 @@
+# Acme Bank (a fictional bank) company policy for the AgentShield demo.
+# Owned by the security team and delivered by IT to an admin-only path:
+#   Windows  C:\ProgramData\AgentShield\policy.yaml
+#   macOS    /Library/Application Support/AgentShield/policy.yaml
+#   Linux    /etc/agentshield/policy.yaml
+# For a demo on an unmanaged laptop: set AGENTSHIELD_COMPANY_POLICY to this file.
+
+version: 1
+name: Acme Bank (demo)
+mode: enforce              # enforce | monitor (monitor logs only; for pilots)
+profile: developer         # assigned role; IT sets it per user group in a real rollout
+
+warning_action: ask        # WARNING asks a human (block for stricter roles)
+rule_of_two: block         # stranger's text + sensitive data + outside action = block
+mild_notes: on
+coach_messages: always
+circuit_breaker: 3
+
+# Outside actions to these hosts do not count as leg C of the Rule of Two.
+allowed_hosts:
+  - registry.npmjs.org
+  - pypi.org
+  - files.pythonhosted.org
+  - artifacts.acme-bank.example
+
+# A push to these remotes asks instead of blocks when the Rule of Two would trip.
+allowed_remotes:
+  - github.com/acme-bank
+
+# Extra secrets on top of the built-in ones (.env, keys, ~/.aws, ~/.ssh, ...).
+protected_paths:
+  - "*.tfstate"
+  - "secrets/**"
+  - "customer-exports/**"
+
+extra_ask_commands:
+  - kubectl delete
+  - terraform destroy
+  - helm uninstall
+
+# Personal and financial data detected in prompts and tool inputs.
+pii: [card, aadhaar, pan, email]
+
+# Nobody below the company can loosen these. Anyone can make them stricter.
+locked:
+  - rule_of_two
+  - allowed_hosts
+  - allowed_remotes
+  - protected_paths
+  - pii
+
+profiles:
+  developer:
+    rank: 1
+    description: Balanced default. WARNING asks, MILD notes.
+  tester:
+    rank: 1
+    description: Balanced, plus published test card numbers are not flagged. Real secrets and outside uploads are still blocked.
+    allow_test_data: true
+  intern:
+    rank: 2
+    description: Strictest day to day. WARNING blocks, coach messages always on.
+    warning_action: block
+    coach_messages: always
+    locked: [warning_action, coach_messages]
+  contractor:
+    rank: 3
+    description: Strict and locked. Reads outside the project ask, two blocks stop the session.
+    warning_action: block
+    outside_reads: ask
+    circuit_breaker: 2
+    locked: [warning_action, outside_reads, circuit_breaker, coach_messages, mild_notes, trusted_mcp_servers]

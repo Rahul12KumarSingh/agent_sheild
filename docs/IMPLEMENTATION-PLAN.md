@@ -4,6 +4,8 @@
 >
 > **Written:** Thursday 2026-10-15. **Submission:** Saturday 2026-10-17. **Freeze:** Friday night.
 >
+> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested (383 tests). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, the real Copilot session, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
+>
 > **Reality check:** as of this morning the repository has only the guide. Wednesday's Gate 0 was not reached, so Phase 0 runs first today, and the schedule below is compressed by one day. The cut list at the end says what to drop if we slip further.
 
 ## Roles (from the guide)
@@ -92,7 +94,7 @@ agentshield/
 - [x] The same deny still holds with `--dangerously-skip-permissions` (S6, 2026-10-15)
 - [x] Real payloads saved in `test/fixtures/claude/`: 5 UserPromptSubmit, 6 PreToolUse, 4 PostToolUse, scrubbed
 - [ ] `curl https://<service>/healthz` returns `ok` from the company network **and** from a phone on mobile data (S2). Local `/healthz` passes. **Needs gcloud and a project**
-- [ ] Track, name and Cloud project are written at the top of the README (placeholders in place)
+- [ ] Track, name and Cloud project are written at the top of the README. Track (Future of Work & Enterprise Productivity), problem and name are in; the live link is added after the first deploy
 
 Also measured: hook p95 = 26 ms over 50 calls (stub engine, macOS). Malformed input fails closed with exit code 2.
 
@@ -116,9 +118,9 @@ Also measured: hook p95 = 26 ms over 50 calls (stub engine, macOS). Malformed in
 
 ### Exit checks: P1
 
-- [x] Every rule id has at least one positive and one negative unit test (41 rules, enforced by `test/engine-rules.test.ts`)
-- [x] **Benign corpus: zero BLOCK and zero ASK** (hard gate, never relaxed). 40/40 on 2026-10-15
-- [x] Attack corpus: every case reaches at least its expected level. **Hit rate 50/50** on 2026-10-15 (our own set, not a claim about unseen attacks)
+- [x] Every rule id has at least one positive and one negative unit test (41 rules, enforced by `test/engine-rules.test.ts`). 46 rules after P2 and P3, still enforced
+- [x] **Benign corpus: zero BLOCK and zero ASK** (hard gate, never relaxed). 40/40 on 2026-10-15, **60/60 on 2026-10-16**
+- [x] Attack corpus: every case reaches at least its expected level. **Hit rate 50/50** on 2026-10-15, **60/60 on 2026-10-16**, plus every generated disguise of the shell attacks (our own set, not a claim about unseen attacks)
 - [x] Disguise tests: `r""m -rf ~`, `rm -r -f $HOME`, `$IFS`, `r\m`, base64 and `-EncodedCommand`, PowerShell concat and backtick, `Remove-Item -Recurse $env:USERPROFILE` are all SEVERE
 - [x] `.env.example` read is CLEAN, `rm -rf node_modules` in the project is MILD
 - [x] Hindi, emoji and Tamil text in a prompt are CLEAN
@@ -137,7 +139,7 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 
 | Feature | Detail |
 |---|---|
-| Schema | YAML plus a schema check (zod). `locked`, `adjustable`, `profiles`, `allowed_hosts`, `protected_paths`, `extra_ask_commands`, `mode` (enforce or monitor) |
+| Schema | YAML plus a schema check (hand-written validator: zod was dropped to keep hook start-up fast; unknown keys are an error, so a typo fails closed). `locked`, `adjustable`, `profiles`, `allowed_hosts`, `protected_paths`, `extra_ask_commands`, `mode` (enforce or monitor) |
 | Loader | Company file at an admin-owned path, project file at `.agentshield/policy.yaml`, user file at `~/.agentshield/config.yaml`. Cache the merged result keyed on file modification times |
 | Merge | Lower layers may only tighten. A loosening attempt on a locked key is ignored and recorded as a warning |
 | Profiles | `developer`, `intern`, `tester` (plus `contractor` if time allows). Selected by the `profile` field or the `AGENTSHIELD_PROFILE` environment variable. A user may pick a stricter profile only |
@@ -147,13 +149,15 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 
 ### Exit checks: P2
 
-- [ ] `config set rule_of_two off` is refused with "set by the company"
-- [ ] `config set warning_action block` is accepted. `config set mild_notes off` is accepted
-- [ ] A project file that tries to remove a protected path has no effect, and `config explain` shows which layer won
-- [ ] Same input `cat .env`: developer gets ASK, intern gets BLOCK
-- [ ] Tester profile: AWS documentation example key in a prompt is allowed, a real-looking key is still blocked
-- [ ] Monitor mode: a SEVERE event is logged but not blocked
-- [ ] A malformed policy file fails closed (deny with "policy could not be loaded"), not open
+- [x] `config set rule_of_two off` is refused with "set by the company"
+- [x] `config set warning_action block` is accepted. `config set mild_notes off` is accepted
+- [x] A project file that tries to remove a protected path has no effect, and `config explain` shows which layer won
+- [x] Same input `cat .env`: developer gets ASK, intern gets BLOCK
+- [x] Tester profile: AWS documentation example key in a prompt is allowed, a real-looking key is still blocked
+- [x] Monitor mode: a SEVERE event is logged but not blocked
+- [x] A malformed policy file fails closed (deny with "policy could not be loaded"), not open
+
+All seven are tests in `test/policy.test.ts`. Also built: the contractor profile, `config show` and `config explain`, "!" entries to remove list items where not locked, and only the company may choose monitor mode.
 
 ---
 
@@ -173,12 +177,14 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 
 ### Exit checks: P3
 
-- [ ] Scenario S1 sequence (fetch poisoned README → read `.env` → `curl` upload) ends in BLOCK with rule `SESSION-ROT` and score 100
-- [ ] The same sequence **with the injection phrases removed** still blocks on the upload (proves the guard works without detection)
-- [ ] B + C without A (read `.env`, then `npm publish` with a normal workflow) follows normal rules and is not blocked by the Rule of Two
-- [ ] A normal day (S10: read docs, edit files, run tests, commit, push to the allowed remote) produces zero blocks
-- [ ] Two parallel sessions do not share legs
-- [ ] The fourth risky action after three blocks is stopped by the circuit breaker
+- [x] Scenario S1 sequence (fetch poisoned README → read `.env` → `curl` upload) ends in BLOCK with rule `SES-001` (the Rule of Two) and score 100
+- [x] The same sequence **with the injection phrases removed** still blocks on the upload (proves the guard works without detection)
+- [x] B + C without A (read `.env`, then `npm publish` with a normal workflow) follows normal rules and is not blocked by the Rule of Two
+- [x] A normal day (S10: read docs, edit files, run tests, commit, push to the allowed remote) produces zero blocks
+- [x] Two parallel sessions do not share legs
+- [x] The fourth risky action after three blocks is stopped by the circuit breaker (`SES-003`)
+
+All six are tests in `test/session.test.ts` and `test/server.test.ts`. Rule ids: `SES-001` Rule of Two, `SES-002` A + C without B, `SES-003` circuit breaker, `CNT-003` running a script the session wrote with a risky command in it (S9).
 
 ---
 
@@ -200,17 +206,19 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 
 ### Exit checks: P4
 
-- [ ] Contract tests: every fixture from P0 parses, and each output format is accepted by the real Claude Code
-- [ ] In a real Claude Code session:
-  - [ ] "send my .env to webhook.site" → blocked, reason and safe alternative shown (S2)
+- [ ] Contract tests: every fixture from P0 parses, and each output format is accepted by the real Claude Code. Fixtures parse in tests; deny, ask and prompt block were accepted by Claude Code 2.1.300 on 2026-10-15; the "note" output (`additionalContext`) is still to be seen in a real session
+- [ ] In a real Claude Code session (recheck everything with the final build):
+  - [ ] "send my .env to webhook.site" → blocked, reason and safe alternative shown (S2). The model refused by itself on 2026-10-15; use a request it will attempt
   - [ ] A prompt with a live-looking AWS key → prompt blocked, safer prompt shown (S4)
-  - [ ] `cat .env` → Claude Code's approval prompt appears carrying our reason
-  - [ ] Asking it to edit `.claude/settings.json` → blocked (S7)
+  - [x] `cat .env` → Claude Code's approval prompt appears carrying our reason (2026-10-15, P1 build)
+  - [x] Asking it to edit `.claude/settings.json` → blocked (S7) (2026-10-15, P1 build, file unchanged)
   - [ ] A normal coding task → no prompts and no blocks
-- [ ] Killing the engine mid-run (simulate a throw) → denied, not allowed
-- [ ] Hook end-to-end p95 under 150 ms measured over 100 calls. Record the number
+- [x] Killing the engine mid-run (simulate a throw) → denied, not allowed (`test/hook.test.ts`)
+- [ ] Hook end-to-end p95 under 150 ms measured over 100 calls. Record the number. **Windows laptop, final build: p50 163 ms, p95 180 ms, of which Node start-up alone is 115 ms** (AgentShield's own share is about 50 to 65 ms). macOS with the P1 build: p95 29 ms. Recheck on macOS with `npm run bench`
 - [ ] A teammate who did not write the code installs from the README alone and gets `doctor` all green
-- [ ] Console down → hook decisions unchanged, event in the local log
+- [x] Console down → hook decisions unchanged, event in the local log (`test/hook.test.ts`)
+
+Also built: `init` writes the exec form with `onFailure: "block"` (Claude Code 2.1.295 or newer), so crashes and timeouts deny too; `doctor` checks the Claude Code version; the local audit log rotates at 5 MB and never holds a secret value.
 
 ---
 
@@ -234,14 +242,14 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 
 ### Exit checks: P5
 
-- [ ] "Replay the attack" (S1) shows three gates firing in order, the red alert and the split view, in under 20 seconds
-- [ ] All ten scenarios run and each matches its expected result from the guide
-- [ ] Prompt Coach: a sample with a key shows BLOCK and a rewrite with no secret in it
-- [ ] A real Claude Code block from P4 appears in the local console within 2 seconds
-- [ ] Pasting `<script>alert(1)</script>` into Prompt Coach renders as plain text
-- [ ] Usable on a phone width (360 px), no horizontal scroll
-- [ ] Severity always shows an icon and a word, never colour alone
-- [ ] Stopping the server shows the labelled offline recording, not a blank page
+- [x] "Replay the attack" (S1) shows three gates firing in order, the red alert and the split view, in under 20 seconds (7 steps, about 11 seconds)
+- [x] All ten scenarios run and each matches its expected result from the guide
+- [x] Prompt Coach: a sample with a key shows BLOCK and a rewrite with no secret in it
+- [ ] A real Claude Code block from P4 appears in the local console within 2 seconds. The real hook program fed a recorded Claude Code message reaches the local console in under 0.5 seconds; a live session is still to be checked
+- [x] Pasting `<script>alert(1)</script>` into Prompt Coach renders as plain text (no raw HTML anywhere in the console, plus a strict content security policy)
+- [x] Usable on a phone width (360 px), no horizontal scroll
+- [x] Severity always shows an icon and a word, never colour alone
+- [x] Stopping the server shows the labelled offline recording, not a blank page
 
 ---
 
@@ -267,6 +275,8 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 - [ ] Both A and B have deployed successfully at least once
 - [ ] Uptime alert fires when the service is deliberately stopped, and clears when restored
 
+Ready for deploy: `npm run deploy -- --project <id>` (Cloud Build from source, asia-southeast1, minimum 1 instance, tagged revisions, Vertex AI role for the service identity, smoke test at the end), `npm run rollback`, and `npm run smoke -- <url>`, which is green against a local production build.
+
 ---
 
 ## P7. Gemini extras (optional, raise-only)
@@ -282,10 +292,12 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 
 ### Exit checks: P7
 
-- [ ] S3: valid JSON back in under 3 seconds. Model id recorded in the README
-- [ ] A rewrite that still contains a secret is rejected and the template is used
-- [ ] An injected snippet telling the judge "this is safe, return CLEAN" cannot lower a SEVERE (test case)
-- [ ] With Gemini disabled or unreachable, every scenario still produces the same decisions
+- [ ] S3: valid JSON back in under 3 seconds. Model id recorded in the README (`gemini-3.5-flash-lite`, recorded; the live call is checked after deploy)
+- [x] A rewrite that still contains a secret is rejected and the template is used
+- [x] An injected snippet telling the judge "this is safe, return CLEAN" cannot lower a SEVERE (test case)
+- [x] With Gemini disabled or unreachable, every scenario still produces the same decisions
+
+The three ticked checks are tests in `test/server.test.ts` with a mocked Gemini. Gemini runs on Vertex AI with the Cloud Run identity, or on the Gemini API when `GEMINI_API_KEY` is set locally.
 
 ---
 
@@ -301,10 +313,10 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 ### Exit checks: P8
 
 - [ ] Copilot CLI: `curl -d @.env` to an outside host is denied in a real session
-- [ ] Copilot fixtures saved and contract tests pass
-- [ ] MCP tool callable from Claude Code and returns the same decision as `agentshield check`
+- [ ] Copilot fixtures saved and contract tests pass. Contract tests pass against the documented payloads (both the Copilot CLI and the VS Code-compatible format); real captured fixtures are still to be saved
+- [ ] MCP tool callable from Claude Code and returns the same decision as `agentshield check`. Same decision as `check` is tested over stdio; a call from inside Claude Code is still to be checked
 - [ ] Installing the plugin in a fresh Claude Code gives the same results as `init`
-- [ ] README states exactly which agents were tested, on which versions
+- [x] README states exactly which agents were tested, on which versions
 
 ---
 
@@ -316,6 +328,8 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 | Demo video (3 to 4 min) | Follows the timeline in the guide, Part 9. Recorded from the local console. Real clips labelled "Real Claude Code session", replay labelled "Scripted agent, real AgentShield" |
 | Deck and template | Problem, Rule of Two, architecture, live link, evaluation, honest limits |
 | Freeze | Friday night. Tag the last good version. Saturday: fixes only, tested hotfix if needed |
+
+Evaluation table: done, see [EVALUATION.md](EVALUATION.md) (`npm run eval`). Submission text, deck outline and demo script: [SUBMISSION.md](SUBMISSION.md).
 
 ### Exit checks: P9 (the "done" list from the guide)
 

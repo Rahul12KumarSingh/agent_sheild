@@ -7,6 +7,8 @@ export interface PathContext {
   cwd: string;
   home: string;
   tmpDirs: string[];
+  /** Extra secret paths from the policy, compiled from globs. */
+  protectedPaths?: RegExp[];
 }
 
 const WIN_ABS = /^[a-zA-Z]:([\\/]|$)/;
@@ -77,6 +79,7 @@ const SAFE_ENV_SUFFIX = /\.(example|sample|template|tpl|dist|default|defaults|sc
 export function isSecretPath(raw: string, ctx: PathContext): boolean {
   const p = lowerResolved(raw, ctx);
   const base = baseName(p);
+  if (ctx.protectedPaths?.some((re) => re.test(p) || re.test(base))) return true;
   if (/^\.env(\.[\w.-]+)?$/.test(base)) return !SAFE_ENV_SUFFIX.test(base);
   if (SECRET_FILES.has(base)) return true;
   if (/\.(pem|key|p12|pfx|jks|keystore|ppk)$/.test(base)) return true;
@@ -92,6 +95,8 @@ export function isGuardrailPath(raw: string, ctx: PathContext): boolean {
     /\/\.claude\/settings(\.local)?\.json$/.test(p) ||
     /\/managed-settings\.json$/.test(p) ||
     /\/\.agentshield(\/|$)/.test(p) ||
+    /\/\.claude\/plugins\/.*agentshield/.test(p) ||
+    /\/plugin\/runtime\/agentshield\.js$/.test(p) ||
     /\/\.cursor\/hooks\.json$/.test(p) ||
     /\/\.github\/hooks(\/|$)/.test(p) ||
     /\/\.copilot\/hooks(\/|$)/.test(p)
@@ -118,3 +123,29 @@ export function isPersistencePath(raw: string, ctx: PathContext): boolean {
 }
 
 export const isAuthorizedKeys = (raw: string, ctx: PathContext) => /\/\.ssh\/authorized_keys2?$/.test(lowerResolved(raw, ctx));
+
+/** Downloaded or third-party code: its text is a stranger's text. */
+export function isThirdPartyPath(raw: string, ctx: PathContext): boolean {
+  const p = lowerResolved(raw, ctx);
+  return /\/(node_modules|vendor|third_party|third-party|site-packages|bower_components)\/|\/downloads\/|\/\.cargo\/registry\//.test(p);
+}
+
+/**
+ * Policy globs: `*.tfstate` matches a file name anywhere, `secrets/**` or `~/.config/acme/**` match by path.
+ * Compiled against the same lowercased, resolved form that isSecretPath uses.
+ */
+export function compileProtectedPaths(globs: string[], ctx: Pick<PathContext, "cwd" | "home">): RegExp[] {
+  return globs.map((glob) => {
+    const hasSlash = /[\\/]/.test(glob.replace(/[\\/]+$/, ""));
+    const target = hasSlash ? resolvePath(glob.replace(/\*\*/g, "__DSTAR__").replace(/\*/g, "__STAR__"), ctx) : glob.toLowerCase();
+    const body = target
+      .toLowerCase()
+      .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+      .replace(/__dstar__|\*\*/g, "\u0000")
+      .replace(/__star__|\*/g, "[^/]*")
+      .replace(/\?/g, "[^/]")
+      .replace(/\u0000/g, ".*")
+      .replace(/\/\.\*$/, "(?:/.*)?");
+    return new RegExp(`^${body}(?:/.*)?$`, "i");
+  });
+}

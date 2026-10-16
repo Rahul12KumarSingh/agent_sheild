@@ -41,11 +41,17 @@ function commandWordDisguised(text: string): boolean {
   for (const part of text.split(SEGMENT_SPLIT)) {
     const tokens = part.trim().split(/\s+/).filter(Boolean);
     const first = tokens.find((t) => !/^(sudo|doas|nohup|time|command|exec|&|\.|[A-Za-z_]\w*=.*)$/.test(t));
-    // Outer quotes are normal ("C:\Program Files\x.exe", or the tail of a quoted subshell).
-    const word = first?.replace(/^["']+|["']+$/g, "");
-    if (!word) continue;
-    if (/^[a-zA-Z]:\\/.test(word) || /^\.?\\/.test(word)) continue; // a Windows path to a program
-    if (/["'\\]/.test(word)) return true;
+    const words = [first];
+    // The command inside bash -c "..." or powershell -Command "..." is a command word too.
+    const c = tokens.findIndex((t) => /^(-c|-command|\/c|\/k)$/i.test(t));
+    if (c > 0 && /^["']?(?:(?:ba|z|da|k)?sh|pwsh|powershell|cmd)(?:\.exe)?$/i.test(tokens[c - 1]!)) words.push(tokens[c + 1]);
+    for (const w of words) {
+      // Outer quotes are normal ("C:\Program Files\x.exe", or the tail of a quoted subshell).
+      const word = w?.replace(/^["']+|["']+$/g, "");
+      if (!word) continue;
+      if (/^[a-zA-Z]:\\/.test(word) || /^\.?\\/.test(word)) continue; // a Windows path to a program
+      if (/["'\\]/.test(word)) return true;
+    }
   }
   return false;
 }

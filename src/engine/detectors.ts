@@ -119,10 +119,72 @@ export function findPII(text: string): PiiMatch[] {
 
 const PII_RULE = { CARD: "PII-001", AADHAAR: "PII-002", PAN: "PII-003", EMAIL: "PII-004" } as const;
 const PII_PLACEHOLDER = { CARD: "<CARD_NUMBER>", AADHAAR: "<AADHAAR>", PAN: "<PAN>", EMAIL: "user@example.com" } as const;
+const PII_PACK = { CARD: "card", AADHAAR: "aadhaar", PAN: "pan", EMAIL: "email" } as const;
 
-export function piiFindings(text: string): Finding[] {
-  return findPII(text).map((p) => hit(PII_RULE[p.type]));
+/** Published test card numbers from payment providers' documentation. */
+const TEST_CARDS = new Set([
+  "4111111111111111", "4242424242424242", "4012888888881881", "4000056655665556", "5555555555554444",
+  "5105105105105100", "2223003122003222", "378282246310005", "371449635398431", "6011111111111117", "3530111333300000",
+]);
+
+export interface PiiOptions {
+  packs?: readonly string[];
+  allowTestData?: boolean;
 }
+
+export function filterPII(matches: PiiMatch[], opts: PiiOptions = {}): PiiMatch[] {
+  return matches.filter(
+    (p) => (!opts.packs || opts.packs.includes(PII_PACK[p.type])) && !(opts.allowTestData && p.type === "CARD" && TEST_CARDS.has(p.value.replace(/\D/g, ""))),
+  );
+}
+
+export function piiFindings(text: string, opts: PiiOptions = {}): Finding[] {
+  return filterPII(findPII(text), opts).map((p) => hit(PII_RULE[p.type]));
+}
+
+/** For logs and the console: secrets and personal data replaced by labels. */
+export function redactAll(text: string): string {
+  let out = redactSecrets(text);
+  for (const p of findPII(out)) if (p.type !== "EMAIL") out = out.split(p.value).join(`[REDACTED:${p.type}]`);
+  return out;
+}
+
+export interface Span {
+  start: number;
+  end: number;
+  label: string;
+}
+
+/** Character ranges worth highlighting in Prompt Coach. Never overlapping, sorted. */
+export function riskySpans(text: string, opts: PiiOptions = {}): Span[] {
+  const t = text.slice(0, MAX_SCAN);
+  const spans: Span[] = [];
+  for (const s of findSecrets(t)) spans.push({ start: s.index, end: s.index + s.value.length, label: s.type });
+  for (const m of t.matchAll(PRIVATE_KEY_BLOCK)) spans.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, label: "PRIVATE_KEY" });
+  for (const p of filterPII(findPII(t), opts)) {
+    let from = 0;
+    for (;;) {
+      const i = t.indexOf(p.value, from);
+      if (i < 0) break;
+      spans.push({ start: i, end: i + p.value.length, label: p.type });
+      from = i + p.value.length;
+    }
+  }
+  for (const re of [...INJECTION_PHRASES, EXFIL_INSTRUCTION, SECRET_THEN_SEND]) {
+    const m = new RegExp(re.source, re.flags.includes("g") ? re.flags : `${re.flags}g`).exec(t);
+    if (m) spans.push({ start: m.index, end: m.index + m[0].length, label: "INSTRUCTION" });
+  }
+  for (const m of t.matchAll(/\bhttps?:\/\/[^\s'"`)]+/gi)) {
+    const host = /^https?:\/\/(?:[^@\s/]+@)?([^/\s:?#]+)/i.exec(m[0])?.[1]?.toLowerCase() ?? "";
+    if (DUMP_HOST_HINT.test(host)) spans.push({ start: m.index ?? 0, end: (m.index ?? 0) + m[0].length, label: "DUMP_SITE" });
+  }
+  spans.sort((a, b) => a.start - b.start || b.end - a.end);
+  const out: Span[] = [];
+  for (const s of spans) if (!out.length || s.start >= out.at(-1)!.end) out.push(s);
+  return out;
+}
+
+const DUMP_HOST_HINT = /(^|\.)(webhook\.site|requestbin\.(net|com)|pipedream\.net|pastebin\.com|transfer\.sh|ngrok(-free)?\.(io|app)|hookbin\.com|beeceptor\.com|file\.io|0x0\.st|interact\.sh|oast\.\w+)$/;
 
 /** The safer prompt: secrets and personal data replaced by placeholders. */
 export function rewritePrompt(text: string): string {
@@ -150,6 +212,16 @@ const EXFIL_INSTRUCTION =
   /\b(?:send|post|upload|copy|exfiltrate|transmit|forward|curl|paste)\b[^.\n]{0,80}?(?:\.env\b|credentials|secrets?\b|api[\s_-]?keys?|tokens?\b|passwords?|ssh\s+keys?|id_rsa)[^\n]{0,120}?(?:https?:\/\/|webhook|endpoint|\burl\b)/i;
 
 const hasPhrase = (s: string) => INJECTION_PHRASES.some((re) => re.test(s));
+
+/** A prompt asking the agent to send secrets somewhere: the user may not realise what they are asking for. */
+const SECRET_THEN_SEND =
+  /(?:\.env\b|credentials|secrets?\b|api[\s_-]?keys?|tokens?\b|passwords?|ssh\s+keys?|id_rsa)[^\n]{0,60}?\b(?:send|post|upload|paste|share|forward|transmit)\b[^\n]{0,80}?(?:https?:\/\/|webhook|pastebin|\bgist\b)/i;
+
+export function exfilRequest(text: string): string | undefined {
+  const t = text.slice(0, MAX_SCAN);
+  const m = EXFIL_INSTRUCTION.exec(t) ?? SECRET_THEN_SEND.exec(t);
+  return m ? clip(redactSecrets(m[0])) : undefined;
+}
 
 export function injectionFindings(text: string): Finding[] {
   const t = text.slice(0, MAX_SCAN);

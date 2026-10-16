@@ -23,11 +23,11 @@ export function levelOf(score: number): Level {
 
 /**
  * Prompts can be blocked but not "asked" about, and results have already happened,
- * so both can only be noted unless a prompt is SEVERE.
+ * so both can only be noted unless a prompt is SEVERE (or WARNING when the policy says block).
  */
-export function actionFor(kind: ShieldEvent["kind"], level: Level): Action {
+export function actionFor(kind: ShieldEvent["kind"], level: Level, warningAction: "ask" | "block" = "ask"): Action {
   if (level === "CLEAN") return "allow";
-  if (kind === "action") return level === "SEVERE" ? "block" : level === "WARNING" ? "ask" : "note";
-  if (kind === "prompt") return level === "SEVERE" ? "block" : "note";
+  if (kind === "action") return level === "SEVERE" ? "block" : level === "WARNING" ? warningAction : "note";
+  if (kind === "prompt") return level === "SEVERE" || (level === "WARNING" && warningAction === "block") ? "block" : "note";
   return "note";
 }

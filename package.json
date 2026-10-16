@@ -1,6 +1,6 @@
 {
   "name": "agentshield",
-  "version": "0.0.1",
+  "version": "0.9.0",
   "description": "A policy checkpoint for AI coding agents: checks every prompt and action, blocks the dangerous ones, suggests safe alternatives.",
   "type": "module",
   "license": "MIT",
@@ -12,22 +12,37 @@
     "agentshield": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && vite build --config console/vite.config.ts --logLevel warn && node scripts/build-plugin.mjs",
+    "build:server": "tsup",
     "dev:server": "tsup --watch --onSuccess \"node dist/server.js\"",
+    "dev:console": "vite --config console/vite.config.ts",
     "start": "node dist/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "deploy": "node scripts/deploy.mjs"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p console",
+    "record": "node scripts/record.mjs",
+    "bench": "node scripts/bench-hook.mjs",
+    "eval": "node scripts/eval.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "rollback": "node scripts/rollback.mjs",
+    "attacker": "node scripts/fake-attacker.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
-    "hono": "^4.13.13"
+    "hono": "^4.13.13",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "tsup": "^9.0.0",
     "typescript": "^7.0.2",
+    "vite": "^8.3.4",
     "vitest": "^5.0.4"
   }
 }

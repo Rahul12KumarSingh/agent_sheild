@@ -1,0 +1,28 @@
+{
+  "description": "AgentShield: check every prompt, action and result. Fails closed if the check cannot run.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"], "timeout": 30, "onFailure": "block" }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"], "timeout": 30, "onFailure": "block" }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [
+          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"], "timeout": 30, "onFailure": "block" }
+        ]
+      }
+    ]
+  }
+}
