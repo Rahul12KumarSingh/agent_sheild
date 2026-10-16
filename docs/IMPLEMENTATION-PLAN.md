@@ -4,7 +4,7 @@
 >
 > **Written:** Thursday 2026-10-15. **Submission:** Saturday 2026-10-17. **Freeze:** Friday night.
 >
-> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested. P10, the hardening after the first runs on other machines, is done and tested too (1248 tests). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, a real session of each other agent app, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
+> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested. P10, the hardening after the first runs on other machines, is done and tested too (1368 tests, after merging the AI judge, custom rules and guardrail packs from main). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, a real session of each other agent app, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
 >
 > **Reality check:** as of this morning the repository has only the guide. Wednesday's Gate 0 was not reached, so Phase 0 runs first today, and the schedule below is compressed by one day. The cut list at the end says what to drop if we slip further.
 
