@@ -9,6 +9,7 @@ import { MAX_SCAN } from "./normalize.js";
 import {
   classifyPath,
   compileProtectedPaths,
+  globReachesSecret,
   isAuthorizedKeys,
   isGuardrailOrParent,
   isGuardrailPath,
@@ -124,7 +125,7 @@ function analyzeAction(e: ActionEvent, c: Ctx): Analysis {
 
   if (kind === "read" || kind === "search") {
     for (const filePath of paths) {
-      if (isSecretPath(filePath, ctx)) findings.push(hit("SEC-004", filePath, undefined, undefined, pathTarget(filePath, ctx)));
+      if (isSecretPath(filePath, ctx) || (kind === "search" && globReachesSecret(filePath, ctx))) findings.push(hit("SEC-004", filePath, undefined, undefined, pathTarget(filePath, ctx)));
       else if (settings.outside_reads === "ask") {
         const where = classifyPath(filePath, ctx);
         if (where !== "project" && where !== "project-root" && where !== "temp") findings.push(hit("POL-002", filePath, undefined, undefined, pathTarget(filePath, ctx)));

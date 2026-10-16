@@ -45,6 +45,8 @@ const PATH_KEYS = [
 ];
 const COMMAND_KEYS = ["command", "cmd", "command_line", "commandLine", "script"];
 const URL_KEYS = ["url", "uri", "link", "href"];
+/** Where a content search is told to look, besides a folder: VS Code `includePattern`, Claude Code `glob`. */
+const SCOPE_KEYS = ["includePattern", "include_pattern", "include", "glob", "file_pattern", "filePattern"];
 const PATCH_KEYS = ["patch", "input", "diff", "content", "text", "command"];
 
 /** `file:///c%3A/Users/me/a.ts` -> `c:/Users/me/a.ts`. */
@@ -109,6 +111,16 @@ function commandOf(input: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/** `create_and_run_task` keeps its shell command inside the task. */
+function taskCommand(input: Record<string, unknown>): string | undefined {
+  const task = input.task;
+  if (!isObj(task)) return undefined;
+  const base = str(task.command);
+  if (!base) return undefined;
+  const args = Array.isArray(task.args) ? task.args.filter((a): a is string => typeof a === "string") : [];
+  return [base, ...args].join(" ");
+}
+
 /** `mcp__server__tool` for every spelling an agent app uses. */
 function mcpName(raw: string, input: Record<string, unknown>): string | undefined {
   if (/^mcp__/.test(raw)) return raw;
@@ -132,7 +144,7 @@ export function canonicalize(rawTool: string, rawInput: unknown): Canonical {
   if (mcp) return { tool: mcp, input, ...(mcp !== name ? { rawTool: name } : {}) };
 
   const result = (tool: string): Canonical => ({ tool, input, ...(tool !== name ? { rawTool: name } : {}) });
-  const command = commandOf(original);
+  const command = commandOf(original) ?? taskCommand(original);
   const path = firstPath(original);
 
   if (COMMAND.test(n) || (command && !WRITE.test(n) && !READ.test(n))) {
@@ -174,7 +186,11 @@ export function canonicalize(rawTool: string, rawInput: unknown): Canonical {
   }
 
   if (GREP.test(n) || GLOB.test(n) || LIST.test(n)) {
+    // A content search told to look only in `.env*` reads secrets like a file read does, so its scope is a path too.
+    const scope = GREP.test(n) ? SCOPE_KEYS.map((k) => str(original[k])).find(Boolean) : undefined;
     if (path) input.file_path = path;
+    else if (scope) input.file_path = scope;
+    if (path && scope) input.paths = [path, scope];
     return result(GLOB.test(n) ? "Glob" : LIST.test(n) ? "LS" : "Grep");
   }
 

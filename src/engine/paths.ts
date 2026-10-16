@@ -92,6 +92,35 @@ export function isSecretPath(raw: string, ctx: PathContext): boolean {
   return /\/\.aws\/credentials$|\/\.kube\/config$|\/\.docker\/config\.json$|\/\.config\/gcloud\/|\/\.azure\/|\/\.config\/gh\/hosts\.yml$|\/library\/keychains\//.test(p);
 }
 
+/** `{a,b}` spelled out, a few levels deep. */
+function braces(s: string, depth = 0): string[] {
+  const m = /\{([^{}]*)\}/.exec(s);
+  if (!m || depth > 3) return [s];
+  return m[1]!.split(",").flatMap((alt) => braces(s.slice(0, m.index) + alt + s.slice(m.index + m[0].length), depth + 1)).slice(0, 32);
+}
+
+/**
+ * A search limited to a pattern such as `.env*`, `**\/*.pem` or `~/.aws/*` reads secrets just like opening the file.
+ * True when a name the pattern can match is a secret file, or the folder it starts in holds credentials.
+ */
+export function globReachesSecret(glob: string, ctx: PathContext): boolean {
+  const g = glob.replace(/\\/g, "/");
+  if (!/[*?{[]/.test(g)) return false;
+  const parts = g.split("/");
+  const firstWild = parts.findIndex((p) => /[*?{[]/.test(p));
+  const fixed = parts.slice(0, firstWild).join("/");
+  if (fixed && isSecretPath(fixed, ctx)) return true;
+  for (const alt of braces(parts[parts.length - 1]!)) {
+    // `.env.example*` can only match example files: do not invent a secret name for it.
+    const fills = SAFE_ENV_SUFFIX.test(alt.split(/[*?[]/)[0]!) ? [""] : ["", "x", ".x", "-x"];
+    for (const fill of fills) {
+      const name = alt.replace(/\*+/g, fill).replace(/\?/g, "x").replace(/\[[^\]]*\]/g, "x");
+      if (name && isSecretPath(name, ctx)) return true;
+    }
+  }
+  return false;
+}
+
 // Where each agent app keeps its hooks and settings. The agent must never change these: they are its guardrails.
 const GUARDRAIL_FILES: RegExp[] = [
   /\/\.claude\/settings(\.local)?\.json$/,

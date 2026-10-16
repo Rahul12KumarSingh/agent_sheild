@@ -74,12 +74,25 @@ node /path/to/agentshield/dist/cli.js doctor            # runs every hook the wa
 | Claude Code | `.claude/settings.json` | Block prompts and tool calls, ask in its own approval prompt. Checked in real sessions |
 | GitHub Copilot CLI | `.github/hooks/agentshield.json` (it also reads `.claude/settings.json`) | Block and ask on tool calls. Prompts are recorded only: Copilot cannot block them |
 | Copilot cloud agent | `.github/hooks/agentshield.json` | Block tool calls. It runs unattended, so an ask is a deny |
-| VS Code (Copilot agent mode) | `.github/hooks/agentshield.json`, or `.claude/settings.json` with `chat.useClaudeHooks` | Block and ask on tool calls |
+| VS Code agent chat (Copilot, "Local" agent) | `.github/hooks/agentshield.json` (a `.claude/settings.json` only with `chat.useClaudeHooks`, which is off by default) | Block and ask on tool calls (VS Code's own confirmation dialog carries our reason), and stop a prompt before the model sees it |
 | Cursor | `.cursor/hooks.json` (it can also read `.claude/settings.json`) | Block prompts, shell, MCP, file edits and reads. Asks on shell and MCP; an ask on a read or an edit becomes a deny that carries the `agentshield allow` command to run |
 | Windsurf (Devin Desktop) | `.windsurf/hooks.json` or `.devin/hooks.json` | Block prompts, shell, reads, edits and MCP. It cannot ask, so an ask is a deny that carries the `agentshield allow` command |
 | Gemini CLI | `.gemini/settings.json` | Block prompts and tool calls. It cannot ask: same as Windsurf |
 
 Only Claude Code has been checked in real sessions so far. The other apps follow each vendor's documented hook format and are covered by contract tests and by an end-to-end test that runs every installed hook command the way the app does.
+
+### In VS Code (the agent chat)
+
+Run `init --agent copilot` in the project, then send your next chat message: VS Code reads the hook file per message, needs a trusted workspace and `chat.useHooks` (on by default; an organisation can switch it off with the `ChatHooks` policy). From then on VS Code runs the hook before every tool call and when you submit a prompt. A block refuses the call and tells the model why. An ask opens VS Code's confirmation dialog with our reason. A key in your prompt stops the turn.
+
+VS Code has several chat targets, each with its own hook implementation (Session Target in the chat view). `init --agent copilot` covers Local (the classic agent) and Copilot (the same hooks as Copilot CLI); plain `init` covers Claude; Codex is not supported yet.
+
+Limits that come from VS Code, not from us:
+
+- A hook that crashes, cannot start (Node missing) or times out only shows a warning and the call goes ahead. Only an explicit verdict blocks, so keep `agentshield doctor` green.
+- On Windows VS Code starts every hook through PowerShell, which costs about half a second per hook and turns exit code 2 into 1. AgentShield therefore answers in VS Code with a JSON verdict on exit 0, and `doctor` checks that launch.
+- Hook settings in your user folder (`init --user`) do not tell VS Code which project they belong to. Install per project.
+- Git through an MCP server (for example a Git tool from an MCP extension) is not shell `git`, so the commit and PR guard does not see it.
 
 Other ways in:
 
@@ -150,11 +163,11 @@ Measured, not claimed: see [docs/EVALUATION.md](docs/EVALUATION.md) (regenerate 
 
 ## Behaviour notes and honest limits
 
-- **Fail closed, but never deaf.** Malformed input or an internal error denies the action, with a reference id for the audit log. A policy file that cannot be loaded does not stop all work: AgentShield switches to strict built-in settings (secrets, destruction and tampering stay blocked, nothing is remembered), says why on every block, and `doctor` names the fix. In Claude Code, `onFailure: "block"` also covers crashes and timeouts. GitHub Copilot denies on a crash but lets a timed-out hook through, by its own design.
+- **Fail closed, but never deaf.** Malformed input or an internal error denies the action, with a reference id for the audit log. A policy file that cannot be loaded does not stop all work: AgentShield switches to strict built-in settings (secrets, destruction and tampering stay blocked, nothing is remembered), says why on every block, and `doctor` names the fix. In Claude Code, `onFailure: "block"` also covers crashes and timeouts. GitHub Copilot CLI denies on a crash but lets a timed-out hook through, by its own design; VS Code lets both through (see above).
 - **Unknown is allowed.** An event or a tool AgentShield does not recognise (a new tool in an agent update) is let through silently. It is never denied just for being unfamiliar.
 - **Headless runs.** With `AGENTSHIELD_HEADLESS=1` or `CI=true`, every ask becomes a deny.
 - **What we do not claim.** We do not catch every injection, hooks do not replace a sandbox, and Copilot's command hooks cannot block prompts (Prompt Coach and the MCP tool cover that side). Images are not scanned. On unmanaged machines a user can remove hooks; use the vendor's managed settings for enforcement. Claude Code keeps a blocked prompt in its local transcript, so rotate any key that was pasted.
-- **Tested on.** Real Claude Code 2.1.300 sessions on macOS: a command is denied with our reason, a prompt is blocked, the deny still holds with `--dangerously-skip-permissions`, `cat .env` gets Claude Code's approval prompt carrying our reason (denied in headless `-p`), and an edit to `.claude/settings.json` is blocked with the file unchanged. Claude Code 2.1.295 or newer is needed for `onFailure: "block"`. The full test suite runs on Windows, macOS and Linux with Node 22 and 24 in CI. Copilot, Cursor, Windsurf and Gemini CLI support follows the documented hook formats and is covered by contract tests; a real session of each is still to be recorded. A real Copilot CLI session on macOS denied every tool call with "hook errored" (it read the Claude Code exec form and ran a bare `node`); that is fixed and covered by a test that runs every installed hook command the way the app does.
+- **Tested on.** Real Claude Code 2.1.300 sessions on macOS: a command is denied with our reason, a prompt is blocked, the deny still holds with `--dangerously-skip-permissions`, `cat .env` gets Claude Code's approval prompt carrying our reason (denied in headless `-p`), and an edit to `.claude/settings.json` is blocked with the file unchanged. Claude Code 2.1.295 or newer is needed for `onFailure: "block"`. The full test suite runs on Windows, macOS and Linux with Node 22 and 24 in CI. Copilot, Cursor, Windsurf and Gemini CLI support follows the documented hook formats and is covered by contract tests; a real session of each is still to be recorded. A real Copilot CLI session on macOS denied every tool call with "hook errored" (it read the Claude Code exec form and ran a bare `node`); that is fixed and covered by a test that runs every installed hook command the way the app does. For VS Code, the hook launcher was read in the bundled source of VS Code 1.139 and reproduced on Windows: starting hooks through PowerShell had turned every block into a mere warning, which is fixed and covered by a test that launches the hook that way (a live agent chat is still to be recorded).
 
 ## Repository layout
 

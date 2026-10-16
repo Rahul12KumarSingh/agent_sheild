@@ -211,7 +211,7 @@ export function readSettings(path: string): Settings {
 
 const RESTART: Record<AgentName, string> = {
   claude: "Restart Claude Code (or open /hooks) so it picks up the change, then run `agentshield doctor`.",
-  copilot: "Copilot CLI and cloud agent read .github/hooks; VS Code needs chat.useHooks (on by default). Prompts are recorded only: Copilot cannot block them.",
+  copilot: "VS Code loads .github/hooks with your next chat message (trusted workspace, chat.useHooks on by default; a Claude-format file needs chat.useClaudeHooks). Copilot CLI and the cloud agent read it too. VS Code can stop a prompt, Copilot CLI only warns.",
   cursor: "Cursor reloads hooks.json on save (check the Hooks output channel). Cursor cannot ask on file reads, so those asks become a deny with the approval command.",
   windsurf: "Restart Windsurf (Devin Desktop). Windsurf hooks cannot ask, so asks become a deny with the approval command.",
   gemini: "Restart Gemini CLI. Gemini hooks cannot ask, so asks become a deny with the approval command.",

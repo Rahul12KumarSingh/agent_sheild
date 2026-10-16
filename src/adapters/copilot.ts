@@ -82,6 +82,9 @@ export function formatCopilot(decision: Decision, event: ShieldEvent, opts: Form
       });
     if (outcome === "block") {
       const reason = denyMessage(decision, event, coach);
+      // VS Code on Windows starts hooks through PowerShell -Command, which turns exit 2 into exit 1: a warning, and the call goes ahead.
+      // VS Code and Copilot CLI both read the JSON verdict on exit 0, so the PascalCase shape is blocked that way.
+      if (pascal) return { exitCode: 0, stdout: answer("deny", reason) };
       // Exit 2 denies on its own; the JSON carries the reason to the agent.
       return { exitCode: 2, stdout: answer("deny", reason), stderr: reason };
     }
@@ -91,10 +94,11 @@ export function formatCopilot(decision: Decision, event: ShieldEvent, opts: Form
 
   if (event.kind === "prompt") {
     // Copilot CLI's command hooks cannot block a prompt: exit 2 shows our reason as a warning and the prompt goes on.
-    // VS Code's Local harness stops the turn on exit 2 / continue:false.
+    // VS Code's Local harness stops the turn on continue:false (read on exit 0, for the PowerShell reason above).
     if (outcome === "block") {
       const reason = denyMessage(decision, event, coach);
-      return { exitCode: 2, stderr: reason, ...(pascal ? { stdout: JSON.stringify({ continue: false, stopReason: reason }) } : {}) };
+      if (pascal) return { exitCode: 0, stdout: JSON.stringify({ continue: false, stopReason: reason, systemMessage: reason }) };
+      return { exitCode: 2, stderr: reason };
     }
     return { exitCode: 0 };
   }
