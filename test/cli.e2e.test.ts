@@ -2,13 +2,14 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
 // Runs the built hook exactly as an agent app does: a separate process, JSON on stdin.
 // Same code path on macOS, Windows and Linux (CI runs all three). Needs `npm run build` first.
 const cli = join(import.meta.dirname, "..", "dist", "cli.js");
 const home = mkdtempSync(join(tmpdir(), "agentshield-e2e-"));
 const env = { ...process.env, AGENTSHIELD_HOME: home, AGENTSHIELD_COMPANY_POLICY: "", CI: "" };
+afterAll(() => rmSync(home, { recursive: true, force: true }));
 
 function hook(payload: string, ...extra: string[]) {
   return spawnSync(process.execPath, [cli, "hook", "claude", ...extra], { input: payload, encoding: "utf8", env });
@@ -33,7 +34,7 @@ describe.skipIf(!existsSync(cli))("built CLI end to end", () => {
   it("fails closed on malformed input", () => {
     const res = hook("{not json");
     expect(res.status).toBe(2);
-    expect(res.stderr).toContain("internal error");
+    expect(res.stderr).toContain("could not read the hook message");
   });
 
   it("captures a payload with --capture, which works in every shell", () => {

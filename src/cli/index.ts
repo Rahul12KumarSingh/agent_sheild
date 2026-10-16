@@ -1,8 +1,9 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import type { HookOutput } from "../adapters/claude.js";
+import type { HookOutput } from "../adapters/types.js";
 import { runHook } from "../hook/run.js";
 import { loadPolicyAsync } from "../policy/index.js";
+import { allowCommand, approvalsCommand } from "./allow.js";
 import { checkText, describeCheck } from "./check.js";
 import { configCommand } from "./config.js";
 import { doctorCommand } from "./doctor.js";
@@ -17,13 +18,15 @@ const CLI = fileURLToPath(import.meta.url);
 const USAGE = `agentshield ${VERSION}: a policy checkpoint for AI coding agents
 
 Usage:
-  agentshield init [--agent claude|copilot] [--user] [--remove] [--in-place]
-                                         Add the hooks (Claude Code: .claude/settings.json; Copilot: .github/hooks/).
+  agentshield init [--agent claude|copilot|cursor|windsurf|gemini|antigravity|all] [--user] [--remove] [--in-place]
+                                         Add the hooks to an agent app's settings (project, or --user for every project).
                                          Hooks run a copy in ~/.agentshield/bin, so npx or a moved install keeps working;
                                          --in-place runs this file instead (for working on AgentShield itself)
-  agentshield doctor                     Check the setup: hooks, policy, session folder, Claude Code, console
+  agentshield doctor                     Check the setup: runs every hook command the way the agent app does
   agentshield check [--json] [--profile <name>] <text>
                                          Score a prompt or command, print level, rules, reason and safe alternative
+  agentshield allow "<command>"            Approve what AgentShield would ask about, for this project (a person's step)
+  agentshield approvals [revoke <n|all>] List or remove saved approvals
   agentshield config show|explain|set|path
                                          Read or change settings. Company rules cannot be loosened
   agentshield setup [--port N] [--no-open]
@@ -32,7 +35,8 @@ Usage:
   agentshield serve [--port 8080]        Run the console locally
   agentshield mcp                        MCP server (stdio) with check_prompt and check_command, advice only
   agentshield hook <agent> [--capture <dir>]
-                                         Called by the agent app's hooks (JSON on stdin). Agents: claude, copilot
+                                         Called by the agent app's hooks (JSON on stdin). The message decides the agent:
+                                         claude, copilot (CLI, cloud agent, VS Code), cursor, windsurf, gemini, antigravity
   agentshield --version
 `;
 
@@ -77,11 +81,15 @@ async function main(argv: string[]): Promise<HookOutput> {
   switch (command) {
     case "hook": {
       const agent = rest[0] ?? "";
-      const run = await runHook({ agent, raw: await readStdin(), captureDir: flag(rest, "--capture") ?? process.env.AGENTSHIELD_CAPTURE_DIR, ai: "auto" });
+      const run = await runHook({ agent, raw: await readStdin(), captureDir: flag(rest, "--capture") ?? process.env.AGENTSHIELD_CAPTURE_DIR, event: flag(rest, "--event"), ai: "auto" });
       return run.output;
     }
     case "check":
       return runCheck(rest);
+    case "allow":
+      return allowCommand(rest, { cwd: process.cwd(), env: process.env });
+    case "approvals":
+      return approvalsCommand(rest, { cwd: process.cwd(), env: process.env });
     case "config":
       return configCommand(rest, { cwd: process.cwd(), env: process.env });
     case "init":

@@ -10,7 +10,7 @@ import type { Finding } from "./types.js";
 // A rule only ever adds a finding: CUS-001 blocks, CUS-002 asks.
 
 export interface CustomInput {
-  kind: "command" | "read" | "search" | "write" | "fetch" | "other" | "prompt";
+  kind: "command" | "read" | "search" | "write" | "delete" | "fetch" | "other" | "prompt";
   command?: string;
   filePath?: string;
   /** Text the event sends or writes: prompt text, written content, a tool's JSON input. */
@@ -65,7 +65,7 @@ function matchRule(r: CustomRule, input: CustomInput, ctx: PathContext): string 
     case "path": {
       const ops = r.on ?? ["read", "write"];
       if (input.filePath) {
-        const op = input.kind === "write" ? "write" : input.kind === "read" || input.kind === "search" ? "read" : undefined;
+        const op = input.kind === "write" || input.kind === "delete" ? "write" : input.kind === "read" || input.kind === "search" ? "read" : undefined;
         if (op && ops.includes(op) && pathMatches(input.filePath, r, ctx)) return input.filePath;
       }
       if (command) {

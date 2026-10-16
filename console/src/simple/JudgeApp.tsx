@@ -118,7 +118,7 @@ export function JudgeApp() {
 
       <footer className="j-foot">
         <div>
-          <b>AgentShield</b> checks every prompt and action of Claude Code and GitHub Copilot on the developer's machine.
+          <b>AgentShield</b> checks every prompt and action of Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini CLI and Antigravity on the developer's machine.
         </div>
         <div className="s-muted">
           AI review and rule writing by Gemini on Vertex AI · Hosted on Google Cloud Run · This public demo only evaluates text: it never runs a command and stores nothing you type.
@@ -196,7 +196,7 @@ function Overview({ counters, go }: { counters: Counters | null; go: (t: Tab, ex
     <>
       <section className="j-hero">
         <div className="j-hero-copy j-rise">
-          <span className="j-eyebrow"><Icon name="spark" size={13} /> For Claude Code and GitHub Copilot</span>
+          <span className="j-eyebrow"><Icon name="spark" size={13} /> For Claude Code, GitHub Copilot, Cursor, Windsurf, Gemini and Antigravity</span>
           <h1>Stop your AI agent from leaking secrets or wrecking your machine.</h1>
           <p>
             AgentShield checks every prompt and every action an AI coding agent takes, before it runs. It stops the dangerous ones, pauses the risky ones for you, and always explains a safer way.
@@ -219,7 +219,7 @@ function Overview({ counters, go }: { counters: Counters | null; go: (t: Tab, ex
 
       <section className="j-steps">
         {[
-          { icon: "bot" as const, title: "The agent wants to act", text: "Claude Code or Copilot is about to run a command, read a file or send your prompt." },
+          { icon: "bot" as const, title: "The agent wants to act", text: "Your coding agent is about to run a command, read a file or send your prompt." },
           { icon: "shield" as const, title: "AgentShield checks it", text: "On your machine, in about 30 ms: rules, guardrails, the Rule of Two and, for risky commands, an AI review." },
           { icon: "check" as const, title: "Stop, pause or go", text: "Dangerous: stopped. Risky: paused until you reply allow. Normal: runs. Every stop comes with a safer way." },
         ].map((s, i) => (
@@ -691,7 +691,7 @@ function Feed({ events, counters, live }: { events: ShieldRecord[]; counters: Co
 
 function GetStarted() {
   const steps: { title: string; cmd: string; text: ReactNode }[] = [
-    { title: "Turn it on in your project", cmd: "npx agentshield-hooks init", text: "Adds AgentShield to Claude Code (use --agent copilot for GitHub Copilot). Nothing else to install." },
+    { title: "Turn it on in your project", cmd: "npx agentshield-hooks init", text: "Adds AgentShield to Claude Code (use --agent all for Copilot, Cursor, Windsurf, Gemini and Antigravity too). Nothing else to install." },
     { title: "Check it is working", cmd: "npx agentshield-hooks doctor", text: "Every line should be green. Then restart your agent." },
     { title: "Open your settings", cmd: "npx agentshield-hooks setup", text: "Guardrails, your own rules in plain English, and everything AgentShield did, in your browser." },
   ];

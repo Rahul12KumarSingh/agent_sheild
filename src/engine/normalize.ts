@@ -36,9 +36,50 @@ function decodePayloads(text: string): string[] {
   return out;
 }
 
+/**
+ * Statements split outside quotes, so the `|` in `rg "a|b"` does not start a command called `b"`.
+ * undefined when the quotes do not balance: the crude split is then the safer view (a heredoc or an apostrophe can fool us).
+ */
+function splitOutsideQuotes(text: string): string[] | undefined {
+  const parts: string[] = [];
+  let cur = "";
+  let quote: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      if (ch === "\\" && quote === '"') {
+        cur += ch + (text[++i] ?? "");
+        continue;
+      }
+      if (ch === quote) quote = null;
+      cur += ch;
+      continue;
+    }
+    if (ch === "\\") {
+      cur += ch + (text[++i] ?? "");
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      cur += ch;
+      continue;
+    }
+    if (ch === "\n" || ch === ";" || ch === "|" || ch === "(" || ch === ")" || ch === "`" || (ch === "&" && text[i + 1] === "&") || (ch === "$" && text[i + 1] === "(")) {
+      parts.push(cur);
+      cur = "";
+      if (ch === "&" || ch === "$") i++;
+      continue;
+    }
+    cur += ch;
+  }
+  if (quote) return undefined;
+  parts.push(cur);
+  return parts;
+}
+
 /** A quote, escape or backtick inside the command word itself, e.g. r""m, 'r'm, r\m, Re`move-Item. */
 function commandWordDisguised(text: string): boolean {
-  for (const part of text.split(SEGMENT_SPLIT)) {
+  for (const part of splitOutsideQuotes(text) ?? text.split(SEGMENT_SPLIT)) {
     const tokens = part.trim().split(/\s+/).filter(Boolean);
     const first = tokens.find((t) => !/^(sudo|doas|nohup|time|command|exec|&|\.|[A-Za-z_]\w*=.*)$/.test(t));
     const words = [first];

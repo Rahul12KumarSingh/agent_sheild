@@ -1,9 +1,25 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import type { HookOutput } from "../adapters/claude.js";
+import type { HookOutput } from "../adapters/types.js";
 
-// `agentshield init`: add our hooks to Claude Code settings without touching anything else. Idempotent.
+// `agentshield init`: add our hooks to an agent app's settings without touching anything else. Idempotent.
+// Every entry is ONE shell string (`node "<cli>" hook <agent>`), never Claude Code's exec form (command + args):
+// Copilot CLI, Cursor and VS Code also read .claude/settings.json and only understand `command`. Given just `node`,
+// they would feed the hook message to Node as a script, exit 1, and (Copilot CLI) deny every tool call as "hook errored".
+
+export const AGENT_NAMES = ["claude", "copilot", "cursor", "windsurf", "gemini", "antigravity"] as const;
+export type AgentName = (typeof AGENT_NAMES)[number];
+
+/** Forward slashes work on every OS and avoid JSON escaping surprises on Windows. */
+export const cliPath = (fileUrlPath: string) => fileUrlPath.replace(/\\/g, "/");
+
+export const hookCommand = (cli: string, agent: string) => `node "${cli}" hook ${agent}`;
+
+/** Is this command line ours (any agent, any path)? Also recognises the old exec form (`node` + args). */
+export const isOurCommand = (line: string) => /\bhook\s+(?:claude|copilot|cursor|windsurf|gemini|antigravity|auto)\b/.test(line) && /agentshield|cli\.js/i.test(line);
+
+// ---------- Claude Code and Gemini CLI: groups of handlers per event ----------
 
 export const CLAUDE_EVENTS = ["UserPromptSubmit", "PreToolUse", "PostToolUse"] as const;
 
@@ -20,24 +36,23 @@ interface Group {
 }
 type Settings = { hooks?: Record<string, Group[]>; [k: string]: unknown };
 
-/** Forward slashes work on every OS and avoid JSON escaping surprises on Windows. */
-export const cliPath = (fileUrlPath: string) => fileUrlPath.replace(/\\/g, "/");
-
-export const isOurs = (h: Handler) => {
-  const line = [h.command ?? "", ...(h.args ?? [])].join(" ");
-  return /\bhook\s+claude\b/.test(line) && /agentshield|cli\.js/i.test(line);
-};
+export const isOurs = (h: Handler) => isOurCommand([h.command ?? "", ...(h.args ?? [])].join(" "));
 
 export function ourHandler(cli: string): Handler {
-  // Exec form: no shell, so paths with spaces need no quoting. onFailure "block" makes a crash or timeout deny (fail closed).
-  return { type: "command", command: "node", args: [cli, "hook", "claude"], timeout: 30, onFailure: "block" };
+  // onFailure "block" (Claude Code 2.1.295+) makes a crash or timeout deny; other apps ignore the field.
+  return { type: "command", command: hookCommand(cli, "claude"), timeout: 30, onFailure: "block" };
+}
+
+export function geminiHandler(cli: string): Handler {
+  return { type: "command", command: hookCommand(cli, "gemini"), name: "agentshield", timeout: 30000 };
 }
 
 /**
  * Where `init` keeps its own copy of the hook program. The CLI is one self-contained file, so hooks that
  * point here keep working after an npx cache cleanup, a global uninstall or a moved clone.
+ * AGENTSHIELD_HOME moves it together with the rest of AgentShield's state (tests, a second profile).
  */
-export const runtimePath = (home = homedir()) => join(home, ".agentshield", "bin", "agentshield.mjs");
+export const runtimePath = (home = homedir()) => join(process.env.AGENTSHIELD_HOME || join(home, ".agentshield"), "bin", "agentshield.mjs");
 
 /** Copy this bundle to the runtime path when it changed, and return the path the hooks should run. */
 export function installRuntime(cli: string, target = runtimePath()): string {
@@ -51,24 +66,13 @@ export function installRuntime(cli: string, target = runtimePath()): string {
   return cliPath(target);
 }
 
-export function settingsPath(opts: { user: boolean; cwd: string; home?: string }): string {
-  return opts.user ? join(opts.home ?? homedir(), ".claude", "settings.json") : join(opts.cwd, ".claude", "settings.json");
-}
-
-export function readSettings(path: string): Settings {
-  if (!existsSync(path)) return {};
-  const raw = readFileSync(path, "utf8").trim();
-  return raw ? (JSON.parse(raw) as Settings) : {};
-}
-
 /** Returns the new settings and a list of changes. Never removes other hooks. */
-export function installClaude(settings: Settings, cli: string, remove = false): { settings: Settings; changes: string[] } {
+function installGroups(settings: Settings, plan: { event: string; matcher?: string }[], handler: Handler, remove: boolean): { settings: Settings; changes: string[] } {
   const next: Settings = structuredClone(settings);
   next.hooks ??= {};
   const changes: string[] = [];
-  const handler = ourHandler(cli);
 
-  for (const event of CLAUDE_EVENTS) {
+  for (const { event, matcher } of plan) {
     const groups = (next.hooks[event] ??= []);
     let found = false;
     for (const group of groups) {
@@ -93,7 +97,7 @@ export function installClaude(settings: Settings, cli: string, remove = false): 
       continue;
     }
     if (!found) {
-      groups.push(event === "UserPromptSubmit" ? { hooks: [handler] } : { matcher: "*", hooks: [handler] });
+      groups.push(matcher === undefined ? { hooks: [handler] } : { matcher, hooks: [handler] });
       changes.push(`added ${event} hook`);
     }
   }
@@ -101,72 +105,230 @@ export function installClaude(settings: Settings, cli: string, remove = false): 
   return { settings: next, changes };
 }
 
-export function initCommand(args: string[], opts: { cwd: string; cli: string; runtime?: string }): HookOutput {
-  const user = args.includes("--user");
-  const remove = args.includes("--remove");
-  const agent = args.includes("--agent") ? args[args.indexOf("--agent") + 1] : "claude";
-  if (agent !== "claude" && agent !== "copilot") return { exitCode: 1, stderr: `init supports --agent claude (default) and --agent copilot.` };
-  // --in-place points the hooks at this very file (for working on AgentShield itself).
-  let hookCli: string;
-  try {
-    hookCli = remove || args.includes("--in-place") ? cliPath(opts.cli) : installRuntime(opts.cli, opts.runtime);
-  } catch (err) {
-    return { exitCode: 1, stderr: `Could not copy the hook program to ${opts.runtime ?? runtimePath()}: ${err instanceof Error ? err.message : String(err)}` };
-  }
-  if (agent === "copilot") return initCopilot({ user, remove, cwd: opts.cwd, cli: hookCli });
+const CLAUDE_PLAN = CLAUDE_EVENTS.map((event) => ({ event, ...(event === "UserPromptSubmit" ? {} : { matcher: "*" }) }));
+const GEMINI_PLAN = [{ event: "BeforeAgent" }, { event: "BeforeTool", matcher: ".*" }, { event: "AfterTool", matcher: ".*" }];
 
-  const path = settingsPath({ user, cwd: opts.cwd });
-  let settings: Settings;
-  try {
-    settings = readSettings(path);
-  } catch (err) {
-    return { exitCode: 1, stderr: `${path} is not valid JSON, nothing changed: ${err instanceof Error ? err.message : String(err)}` };
-  }
-  const { settings: next, changes } = installClaude(settings, hookCli, remove);
-  if (changes.length === 0) return { exitCode: 0, stdout: `${path}: already ${remove ? "clean" : "up to date"}. Run \`agentshield doctor\` to check the setup.` };
-  mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
-  const tail = remove
-    ? "AgentShield hooks removed."
-    : [
-        `Hooks run ${hookCli}.`,
-        "",
-        "Next:",
-        "  1. Restart Claude Code (or open /hooks) so it picks up the change.",
-        "  2. npx agentshield-hooks doctor     check that everything is green",
-        "  3. npx agentshield-hooks setup      settings page: rules in plain English, AI judge, test bench",
-        "",
-        "AI review is on: risky-looking commands (network, delete, database, cloud) and web pages the agent reads",
-        "are also checked by AI, with secrets, your home folder and user name removed. Your prompts never leave.",
-        "It can only make a decision stricter. Turn it off in setup, or add `ai_judge: off` to ~/.agentshield/config.yaml.",
-      ].join("\n");
-  return { exitCode: 0, stdout: `${path}:\n  ${changes.join("\n  ")}\n${tail}` };
+export const installClaude = (settings: Settings, cli: string, remove = false) => installGroups(settings, CLAUDE_PLAN, ourHandler(cli), remove);
+export const installGemini = (settings: Settings, cli: string, remove = false) => installGroups(settings, GEMINI_PLAN, geminiHandler(cli), remove);
+
+// ---------- Antigravity CLI: hooks.json maps a hook name to its events ----------
+
+/** The event is not in Antigravity's payload, so each entry says which one it is. */
+export function antigravityHandler(cli: string, event: "PreToolUse" | "PostToolUse"): Handler {
+  return { type: "command", command: `${hookCommand(cli, "antigravity")}${event === "PostToolUse" ? " --event PostToolUse" : ""}`, timeout: 30 };
 }
 
-// ---------- GitHub Copilot (CLI, cloud agent, VS Code) ----------
+/** Our hooks live under the name "agentshield" in hooks.json. Other hook names are never touched. */
+export function installAntigravity(file: Record<string, unknown>, cli: string, remove = false): { settings: Record<string, unknown>; changes: string[] } {
+  const own = file.agentshield && typeof file.agentshield === "object" && !Array.isArray(file.agentshield) ? (file.agentshield as Record<string, Group[]>) : {};
+  let state: Settings = { hooks: structuredClone(own) };
+  const changes: string[] = [];
+  for (const event of ["PreToolUse", "PostToolUse"] as const) {
+    const r = installGroups(state, [{ event, matcher: "*" }], antigravityHandler(cli, event), remove);
+    state = r.settings;
+    changes.push(...r.changes);
+  }
+  const next = { ...file };
+  if (state.hooks && Object.keys(state.hooks).length > 0) next.agentshield = state.hooks;
+  else delete next.agentshield;
+  return { settings: next, changes };
+}
+
+// ---------- Cursor and Windsurf: one flat entry per event ----------
+
+interface FlatEntry {
+  command?: string;
+  matcher?: string;
+  [k: string]: unknown;
+}
+type FlatFile = { version?: number; hooks?: Record<string, FlatEntry[]>; [k: string]: unknown };
+
+/** Cursor can fail closed per hook. Shell, MCP and file writes do (they can change things); reads and prompts do not. */
+export const CURSOR_PLAN: { event: string; matcher?: string; failClosed: boolean }[] = [
+  { event: "beforeSubmitPrompt", failClosed: false },
+  { event: "beforeShellExecution", failClosed: true },
+  { event: "beforeMCPExecution", failClosed: true },
+  { event: "beforeReadFile", failClosed: false },
+  { event: "preToolUse", matcher: "Write|Delete", failClosed: true },
+  { event: "postToolUse", failClosed: false },
+];
+
+export const WINDSURF_EVENTS = ["pre_user_prompt", "pre_run_command", "pre_read_code", "pre_write_code", "pre_mcp_tool_use", "post_run_command", "post_write_code", "post_mcp_tool_use"] as const;
+
+function installFlat(file: FlatFile, entries: { event: string; entry: FlatEntry }[], remove: boolean): { file: FlatFile; changes: string[] } {
+  const next: FlatFile = structuredClone(file);
+  next.hooks ??= {};
+  const changes: string[] = [];
+  for (const { event, entry } of entries) {
+    const list: FlatEntry[] = (next.hooks[event] ??= []);
+    const at = list.findIndex((e) => isOurCommand(e.command ?? ""));
+    if (remove) {
+      if (at >= 0) {
+        list.splice(at, 1);
+        changes.push(`removed ${event} hook`);
+      }
+      if (list.length === 0) delete next.hooks[event];
+      continue;
+    }
+    if (at < 0) {
+      list.push(entry);
+      changes.push(`added ${event} hook`);
+    } else if (JSON.stringify(list[at]) !== JSON.stringify(entry)) {
+      list[at] = entry;
+      changes.push(`updated ${event} hook`);
+    }
+  }
+  if (Object.keys(next.hooks).length === 0) delete next.hooks;
+  return { file: next, changes };
+}
+
+export function installCursor(file: FlatFile, cli: string, remove = false) {
+  const base: FlatFile = { version: 1, ...file };
+  return installFlat(
+    base,
+    CURSOR_PLAN.map((p) => ({ event: p.event, entry: { command: hookCommand(cli, "cursor"), timeout: 30, failClosed: p.failClosed, ...(p.matcher ? { matcher: p.matcher } : {}) } })),
+    remove,
+  );
+}
+
+export function installWindsurf(file: FlatFile, cli: string, remove = false) {
+  const command = hookCommand(cli, "windsurf");
+  return installFlat(file, WINDSURF_EVENTS.map((event) => ({ event, entry: { command, powershell: command, show_output: false } })), remove);
+}
+
+// ---------- GitHub Copilot (CLI, cloud agent, VS Code): one file of our own ----------
 
 export const COPILOT_EVENTS = ["userPromptSubmitted", "preToolUse", "postToolUse"] as const;
 
-/** One file of our own, so other hook files are never touched. `command` works in bash and PowerShell. */
+/** `command` works in bash and PowerShell. */
 export function copilotHooks(cli: string) {
-  const entry = { type: "command", command: `node "${cli}" hook copilot`, timeoutSec: 30 };
+  const entry = { type: "command", command: hookCommand(cli, "copilot"), timeoutSec: 30 };
   return { version: 1, hooks: Object.fromEntries(COPILOT_EVENTS.map((e) => [e, [entry]])) };
 }
 
-function initCopilot(o: { user: boolean; remove: boolean; cwd: string; cli: string; home?: string }): HookOutput {
-  const dir = o.user ? join(o.home ?? homedir(), ".copilot", "hooks") : join(o.cwd, ".github", "hooks");
-  const path = join(dir, "agentshield.json");
-  if (o.remove) {
-    if (!existsSync(path)) return { exitCode: 0, stdout: `${path}: nothing to remove.` };
-    rmSync(path);
-    return { exitCode: 0, stdout: `${path}: removed.` };
+// ---------- Files ----------
+
+export interface InitOptions {
+  cwd: string;
+  cli: string;
+  home?: string;
+  /** Where the hook program is copied to (tests). */
+  runtime?: string;
+}
+
+interface Target {
+  path: string;
+  /** Pure change of the parsed file. `undefined` for Copilot, which owns its whole file. */
+  apply?: (data: Record<string, unknown>, cli: string, remove: boolean) => { data: Record<string, unknown>; changes: string[] };
+}
+
+export function targetFor(agent: AgentName, o: { user: boolean; cwd: string; home?: string }): Target {
+  const home = o.home ?? homedir();
+  const root = o.user ? home : o.cwd;
+  switch (agent) {
+    case "claude":
+      return { path: join(root, ".claude", "settings.json"), apply: (d, c, r) => { const x = installClaude(d as Settings, c, r); return { data: x.settings, changes: x.changes }; } };
+    case "gemini":
+      return { path: join(root, ".gemini", "settings.json"), apply: (d, c, r) => { const x = installGemini(d as Settings, c, r); return { data: x.settings, changes: x.changes }; } };
+    case "antigravity":
+      return { path: o.user ? join(home, ".gemini", "config", "hooks.json") : join(root, ".agents", "hooks.json"), apply: (d, c, r) => { const x = installAntigravity(d, c, r); return { data: x.settings, changes: x.changes }; } };
+    case "cursor":
+      return { path: join(root, ".cursor", "hooks.json"), apply: (d, c, r) => { const x = installCursor(d as FlatFile, c, r); return { data: x.file, changes: x.changes }; } };
+    case "windsurf": {
+      // Devin Desktop reads .devin/hooks.json first; the older .windsurf/hooks.json only when that has no hooks.
+      const path = o.user
+        ? join(home, ".codeium", "windsurf", "hooks.json")
+        : existsSync(join(o.cwd, ".devin", "hooks.json")) ? join(o.cwd, ".devin", "hooks.json") : join(o.cwd, ".windsurf", "hooks.json");
+      return { path, apply: (d, c, r) => { const x = installWindsurf(d as FlatFile, c, r); return { data: x.file, changes: x.changes }; } };
+    }
+    case "copilot":
+      return { path: o.user ? join(home, ".copilot", "hooks", "agentshield.json") : join(o.cwd, ".github", "hooks", "agentshield.json") };
   }
-  const next = `${JSON.stringify(copilotHooks(o.cli), null, 2)}\n`;
-  if (existsSync(path) && readFileSync(path, "utf8") === next) return { exitCode: 0, stdout: `${path}: already up to date.` };
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(path, next);
-  return {
-    exitCode: 0,
-    stdout: `${path}: AgentShield hooks for userPromptSubmitted, preToolUse, postToolUse.\nCopilot can deny actions (fail closed on a crash) but cannot block prompts; prompts are recorded only.`,
-  };
+}
+
+/** Kept for the doctor and older callers: Claude Code's settings file. */
+export const settingsPath = (opts: { user: boolean; cwd: string; home?: string }) => targetFor("claude", opts).path;
+
+export function readSettings(path: string): Settings {
+  if (!existsSync(path)) return {};
+  const raw = readFileSync(path, "utf8").trim();
+  return raw ? (JSON.parse(raw) as Settings) : {};
+}
+
+const RESTART: Record<AgentName, string> = {
+  claude: "Restart Claude Code (or open /hooks) so it picks up the change, then run `agentshield doctor`.",
+  copilot: "VS Code loads .github/hooks with your next chat message (trusted workspace, chat.useHooks on by default; a Claude-format file needs chat.useClaudeHooks). Copilot CLI and the cloud agent read it too. VS Code can stop a prompt, Copilot CLI only warns.",
+  cursor: "Cursor reloads hooks.json on save (check the Hooks output channel). Cursor cannot ask on file reads, so those asks become a deny with the approval command.",
+  windsurf: "Restart Windsurf (Devin Desktop). Windsurf hooks cannot ask, so asks become a deny with the approval command.",
+  gemini: "Restart Gemini CLI. Gemini hooks cannot ask, so asks become a deny with the approval command.",
+  antigravity: "Restart Antigravity CLI (type /hooks to see it). It has no prompt hook, so prompts are not scanned, and its hooks never see tool results, so text hidden in a result is not quarantined.",
+};
+
+function initOne(agent: AgentName, o: { user: boolean; remove: boolean; cwd: string; cli: string; home?: string }): HookOutput {
+  const target = targetFor(agent, o);
+  const path = target.path;
+
+  if (!target.apply) {
+    // Copilot: a file of our own, so other hook files are never touched.
+    if (o.remove) {
+      if (!existsSync(path)) return { exitCode: 0, stdout: `${path}: nothing to remove.` };
+      rmSync(path);
+      return { exitCode: 0, stdout: `${path}: removed.` };
+    }
+    const next = `${JSON.stringify(copilotHooks(o.cli), null, 2)}\n`;
+    if (existsSync(path) && readFileSync(path, "utf8") === next) return { exitCode: 0, stdout: `${path}: already up to date.` };
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, next);
+    return { exitCode: 0, stdout: `${path}: AgentShield hooks for userPromptSubmitted, preToolUse, postToolUse.\n${RESTART.copilot}` };
+  }
+
+  let data: Record<string, unknown>;
+  try {
+    data = readSettings(path) as Record<string, unknown>;
+  } catch (err) {
+    return { exitCode: 1, stderr: `${path} is not valid JSON, nothing changed: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const { data: next, changes } = target.apply(data, o.cli, o.remove);
+  if (changes.length === 0) return { exitCode: 0, stdout: `${path}: already ${o.remove ? "clean" : "up to date"}.` };
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(next, null, 2)}\n`);
+  return { exitCode: 0, stdout: `${path}:\n  ${changes.join("\n  ")}\n${o.remove ? "AgentShield hooks removed." : RESTART[agent]}` };
+}
+
+export function initCommand(args: string[], opts: InitOptions): HookOutput {
+  const user = args.includes("--user");
+  const remove = args.includes("--remove");
+  const wanted = args.includes("--agent") ? (args[args.indexOf("--agent") + 1] ?? "") : "claude";
+  const names = wanted === "all" ? [...AGENT_NAMES] : AGENT_NAMES.filter((n) => n === wanted);
+  if (names.length === 0) return { exitCode: 1, stderr: `init supports --agent ${AGENT_NAMES.join("|")}|all (default claude).` };
+
+  // Hooks run a copy kept in ~/.agentshield/bin, so a moved clone or a cleaned npx cache cannot break them.
+  // --in-place points them at this very file (for working on AgentShield itself); removing never needs a copy.
+  let cli: string;
+  try {
+    cli = remove || args.includes("--in-place") ? cliPath(opts.cli) : installRuntime(opts.cli, opts.runtime);
+  } catch (err) {
+    return { exitCode: 1, stderr: `Could not copy the hook program to ${opts.runtime ?? runtimePath()}: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  const out: string[] = [];
+  let exitCode = 0;
+  for (const agent of names) {
+    const r = initOne(agent, { user, remove, cwd: opts.cwd, cli, home: opts.home });
+    exitCode = Math.max(exitCode, r.exitCode);
+    out.push(r.exitCode === 0 ? (r.stdout ?? "") : (r.stderr ?? ""));
+  }
+  if (!remove && names.includes("copilot") && names.includes("claude")) {
+    out.push("Note: Copilot CLI also reads .claude/settings.json. If both files are present, a repeated event is counted once.");
+  }
+  if (!remove) {
+    out.push(
+      [
+        `Hooks run ${cli}.`,
+        "Next: `agentshield doctor` runs every hook command the way the agent app does; `agentshield setup` opens the settings page (rules in plain English, AI judge, test bench).",
+        "AI review is on: risky-looking commands (network, delete, database, cloud) and web pages the agent reads are also checked by AI, with secrets, your home folder and user name removed. Your prompts never leave. It can only make a decision stricter. Turn it off in setup, or add `ai_judge: off` to ~/.agentshield/config.yaml.",
+      ].join("\n"),
+    );
+  }
+  const text = out.join("\n");
+  return exitCode ? { exitCode, stderr: text } : { exitCode, stdout: text };
 }

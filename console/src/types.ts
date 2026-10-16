@@ -27,6 +27,8 @@ export interface ShieldRecord {
   reason: string;
   safeAlternative?: string;
   monitored?: Action;
+  /** An earlier approval turned an ask into a note. */
+  approved?: boolean;
   legs: { A?: string; B?: string; C?: string };
   ruleOfTwo: boolean;
   profile?: string;

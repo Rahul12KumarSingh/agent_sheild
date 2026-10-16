@@ -4,7 +4,7 @@
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"], "timeout": 30, "onFailure": "block" }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js\" hook claude", "timeout": 30, "onFailure": "block" }
         ]
       }
     ],
@@ -12,7 +12,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"], "timeout": 30, "onFailure": "block" }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js\" hook claude", "timeout": 30, "onFailure": "block" }
         ]
       }
     ],
@@ -20,7 +20,7 @@
       {
         "matcher": "*",
         "hooks": [
-          { "type": "command", "command": "node", "args": ["${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js", "hook", "claude"], "timeout": 30, "onFailure": "block" }
+          { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/runtime/agentshield.js\" hook claude", "timeout": 30, "onFailure": "block" }
         ]
       }
     ]

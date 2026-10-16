@@ -16,9 +16,10 @@ export type Category =
   | "PRIV"
   | "SUPPLY"
   | "TAMPER"
-  | "SESSION";
+  | "SESSION"
+  | "GIT";
 
-export type AgentId = "claude" | "copilot" | "cursor" | "scripted";
+export type AgentId = "claude" | "copilot" | "cursor" | "windsurf" | "gemini" | "antigravity" | "scripted";
 
 interface EventBase {
   agent: AgentId;
@@ -26,6 +27,8 @@ interface EventBase {
   cwd: string;
   /** True when no human can answer an ask (CI, headless runs): ask becomes deny. */
   headless: boolean;
+  /** Which hook of the agent app this came from (for example "beforeShellExecution"). Decides the answer's shape. */
+  surface?: string;
 }
 
 export interface PromptEvent extends EventBase {
@@ -35,9 +38,13 @@ export interface PromptEvent extends EventBase {
 
 export interface ActionEvent extends EventBase {
   kind: "action";
-  /** The agent's own tool name, e.g. "Bash", "Write", "WebFetch", "mcp__github__create_issue". */
+  /** The canonical tool name, e.g. "Bash", "Write", "WebFetch", "mcp__github__create_issue". */
   tool: string;
   input: Record<string, unknown>;
+  /** The agent's own id for this tool call, when it has one. Ties a result back to the action we asked about. */
+  toolUseId?: string;
+  /** The tool name as the agent app wrote it, when the adapter renamed it. */
+  rawTool?: string;
 }
 
 export interface ResultEvent extends EventBase {
@@ -45,6 +52,8 @@ export interface ResultEvent extends EventBase {
   tool: string;
   input: Record<string, unknown>;
   output: unknown;
+  toolUseId?: string;
+  rawTool?: string;
 }
 
 export type ShieldEvent = PromptEvent | ActionEvent | ResultEvent;
@@ -58,8 +67,20 @@ export interface Finding {
   reason: string;
   /** Redacted snippet of what matched, safe to log. */
   excerpt?: string;
+  /** What the finding is about (a resolved path, a host or a command), used to remember an approval. */
+  target?: string;
   /** A rule-specific safe alternative (custom rules); otherwise the catalog's. */
   alternative?: string;
+}
+
+/** One thing a person is asked to approve. Approving it once can cover the same thing for the rest of the session. */
+export interface ApprovalItem {
+  ruleId: string;
+  target: string;
+  /** Short, redacted text for the approvals list. */
+  label: string;
+  /** False for rules that must be asked every time (a tripped Rule of Two, privilege, persistence). */
+  rememberable: boolean;
 }
 
 export interface Decision {
@@ -74,6 +95,10 @@ export interface Decision {
   safeAlternative?: string;
   /** Monitor mode: what enforce mode would have done. The action itself is then "allow". */
   monitored?: Action;
+  /** Set when an earlier approval turned this ask into a note. */
+  approved?: boolean;
+  /** What a person is being asked to approve (action "ask", or a deny because the agent app cannot ask). */
+  asks?: ApprovalItem[];
   /** AgentShield's own approval flow (Claude Code): paused for the user, allowed once, or the user's "allow". */
   approval?: { state: "needed" | "granted" | "acknowledged"; summary: string };
   /** The Rule of Two legs after this event (A stranger's text, B sensitive data, C this action reaches outside). */

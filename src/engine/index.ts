@@ -1,25 +1,33 @@
 import { homedir, tmpdir } from "node:os";
 import { DEFAULT_POLICY, type EffectivePolicy } from "../policy/index.js";
+import { allCovered, approvalId, eventSig, eventSigs, itemOf, needsApproval, promote, recordPending, type ApprovedLookup } from "./approvals.js";
 import { clip, dedupe, hit, RULES, type RuleId } from "./catalog.js";
-import { analyzeCommand, commandFindingsInContent, isDumpHost, type OutsideAction, urlHosts } from "./commands.js";
+import { analyzeCommand, commandFindingsInContent, gitGates, type GitGate, isDumpHost, type OutsideAction, urlHosts } from "./commands.js";
 import { customRuleFindings } from "./custom.js";
+import { analyzeDiff } from "./diff.js";
 import { exfilRequest, findSecrets, injectionFindings, piiFindings, type PiiOptions, redactSecrets, rewritePrompt } from "./detectors.js";
 import { MAX_SCAN } from "./normalize.js";
 import {
   classifyPath,
   compileProtectedPaths,
+  globReachesSecret,
   isAuthorizedKeys,
+  isGuardrailOrParent,
   isGuardrailPath,
   isInstructionPath,
   isPersistencePath,
   isSecretPath,
+  isSensitiveToDelete,
   type PathContext,
+  pathTarget,
 } from "./paths.js";
 import { actionFor, findingWeight, levelOf, scoreOf } from "./score.js";
 import {
   filePathOf,
+  filePathsOf,
   type FlaggedScript,
   flaggedScriptRun,
+  isLocalOnlyTool,
   isReadOnly,
   nextSession,
   outsideAction,
@@ -34,6 +42,8 @@ import type { Action, ActionEvent, Decision, Finding, ResultEvent, ShieldEvent }
 
 export * from "./types.js";
 export { RULE_IDS, RULES } from "./catalog.js";
+export { approvalId, eventSig, itemOf, needsApproval, normalizeTarget, rememberable, type ApprovedLookup } from "./approvals.js";
+export { gitGates, type GitGate } from "./commands.js";
 export { newSession, type SessionState } from "./session.js";
 
 export interface EngineContext {
@@ -50,6 +60,12 @@ export interface EvaluateOptions {
   session?: SessionState;
   /** Resolve a git remote name to its URL (the hook reads .git/config). */
   remoteUrl?: (name: string) => string | undefined;
+  /** The changes a git command is about to commit or publish. Called only for commands that commit or push. */
+  diff?: (gate: GitGate) => string | undefined;
+  /** Approvals given outside this session (`agentshield allow`). Session approvals live in the session itself. */
+  approved?: ApprovedLookup;
+  /** The same call already ran through AgentShield a moment ago (two hook files for one event): do not count it twice. */
+  duplicate?: boolean;
 }
 
 interface Analysis {
@@ -62,11 +78,30 @@ interface Ctx {
   policy: EffectivePolicy;
   pii: PiiOptions;
   session: SessionSettings;
+  diff?: (gate: GitGate) => string | undefined;
 }
 
+const CONTENT_KEYS = ["content", "contents", "new_string", "newString", "new_source", "new_str", "file_text", "text", "code_edit", "replacement", "insert_text", "CodeContent", "ReplacementContent"];
+const PATCH_KEYS = ["patch", "input", "diff"];
+
+/** Apps whose own approval prompt has Allow once and Always allow, and honours a hook's plain "ask" by that memory. */
+const APPS_THAT_REMEMBER = new Set<string>(["antigravity"]);
+
+/** The text a write tool puts into files: new content, replacements, and the added lines of a patch. */
 function writtenContent(input: Record<string, unknown>): string {
-  const parts = [input.content, input.new_string, input.new_source, input.new_str, input.file_text, input.text];
-  if (Array.isArray(input.edits)) for (const e of input.edits) parts.push((e as Record<string, unknown>)?.new_string);
+  const parts: unknown[] = CONTENT_KEYS.map((k) => input[k]);
+  for (const list of [input.edits, input.replacements, input.changes, input.ReplacementChunks]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (item && typeof item === "object") for (const k of CONTENT_KEYS) parts.push((item as Record<string, unknown>)[k]);
+    }
+  }
+  for (const k of PATCH_KEYS) {
+    const patch = input[k];
+    if (typeof patch === "string" && /^\*\*\* (?:Begin Patch|Add File|Update File)|^(?:diff --git|@@ |--- )/m.test(patch)) {
+      parts.push(patch.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).map((l) => l.slice(1)).join("\n"));
+    }
+  }
   return parts.filter((p): p is string => typeof p === "string").join("\n");
 }
 
@@ -77,51 +112,67 @@ function analyzeAction(e: ActionEvent, c: Ctx): Analysis {
   const settings = c.policy.settings;
   const findings: Finding[] = [];
   let disguised = false;
-  const filePath = filePathOf(e.input);
+  const paths = filePathsOf(e.input);
   const kind = toolKind(e.tool, e.input);
 
   if (kind === "command") {
-    const r = analyzeCommand(String(e.input.command), ctx, { allowedHosts: settings.allowed_hosts, extraAskCommands: settings.extra_ask_commands });
+    const command = String(e.input.command);
+    const r = analyzeCommand(command, ctx, { allowedHosts: settings.allowed_hosts, extraAskCommands: settings.extra_ask_commands });
     findings.push(...r.findings);
     disguised = r.disguised;
-  }
-
-  if (filePath && (kind === "read" || kind === "search")) {
-    if (isSecretPath(filePath, ctx)) findings.push(hit("SEC-004", filePath));
-    else if (settings.outside_reads === "ask") {
-      const where = classifyPath(filePath, ctx);
-      if (where !== "project" && where !== "project-root" && where !== "temp") findings.push(hit("POL-002", filePath));
+    // About to commit or push: look at what is in the change, not only at the command.
+    if (c.diff) {
+      const diffs = gitGates(command).map((g) => c.diff!(g)).filter((d): d is string => Boolean(d));
+      if (diffs.length > 0) findings.push(...analyzeDiff(diffs.join("\n"), ctx));
     }
   }
 
-  if (filePath && kind === "write") {
-    if (isGuardrailPath(filePath, ctx)) findings.push(hit("TAM-001", filePath));
-    else if (isAuthorizedKeys(filePath, ctx)) findings.push(hit("PER-002", filePath));
-    else if (isInstructionPath(filePath, ctx)) findings.push(hit("TAM-002", filePath));
-    else if (isPersistencePath(filePath, ctx)) findings.push(hit("PER-001", filePath));
-    else {
-      const where = classifyPath(filePath, ctx);
-      if (where === "outside" || where === "home" || where === "system" || where === "root") findings.push(hit("DES-009", filePath));
+  if (kind === "read" || kind === "search") {
+    for (const filePath of paths) {
+      if (isSecretPath(filePath, ctx) || (kind === "search" && globReachesSecret(filePath, ctx))) findings.push(hit("SEC-004", filePath, undefined, undefined, pathTarget(filePath, ctx)));
+      else if (settings.outside_reads === "ask") {
+        const where = classifyPath(filePath, ctx);
+        if (where !== "project" && where !== "project-root" && where !== "temp") findings.push(hit("POL-002", filePath, undefined, undefined, pathTarget(filePath, ctx)));
+      }
     }
+  }
 
+  if (kind === "write" || kind === "delete") {
+    for (const filePath of paths) {
+      const target = pathTarget(filePath, ctx);
+      if (kind === "delete" ? isGuardrailOrParent(filePath, ctx) : isGuardrailPath(filePath, ctx)) findings.push(hit("TAM-001", filePath, undefined, undefined, target));
+      else if (isAuthorizedKeys(filePath, ctx)) findings.push(hit("PER-002", filePath, undefined, undefined, target));
+      else if (isInstructionPath(filePath, ctx)) findings.push(hit("TAM-002", filePath, undefined, undefined, target));
+      else if (isPersistencePath(filePath, ctx)) findings.push(hit("PER-001", filePath, undefined, undefined, target));
+      else if (kind === "delete" && isSensitiveToDelete(filePath, ctx)) findings.push(hit("DES-010", filePath, undefined, undefined, target));
+      else {
+        const where = classifyPath(filePath, ctx);
+        if (where === "outside" || where === "home" || where === "system" || where === "root") findings.push(hit("DES-009", filePath, undefined, undefined, target));
+      }
+    }
+  }
+
+  if (kind === "write") {
     const content = writtenContent(e.input).slice(0, MAX_SCAN);
-    if (findSecrets(content).length > 0 && !isSecretPath(filePath, ctx)) findings.push(hit("SEC-003", filePath));
+    const first = paths[0] ?? "";
+    if (findSecrets(content).length > 0 && !paths.some((p) => isSecretPath(p, ctx))) findings.push(hit("SEC-003", first, undefined, undefined, pathTarget(first, ctx)));
     const risky = commandFindingsInContent(content, ctx);
     if (risky.length > 0) {
       const top = risky.reduce((a, b) => (findingWeight(b) > findingWeight(a) ? b : a));
-      const detail = `${top.ruleId} in ${filePath}`;
-      findings.push(SCRIPT_FILE.test(filePath) && top.level === "SEVERE" ? hit("CNT-001", detail, top.excerpt) : hit("CNT-002", detail, top.excerpt));
+      const scriptPath = paths.find((p) => SCRIPT_FILE.test(p)) ?? first;
+      const detail = `${top.ruleId} in ${scriptPath}`;
+      findings.push(SCRIPT_FILE.test(scriptPath) && top.level === "SEVERE" ? hit("CNT-001", detail, top.excerpt) : hit("CNT-002", detail, top.excerpt));
     }
   }
 
   // The team's own rules (custom_rules in the policy).
   if (c.policy.customRules.length) {
     const text = kind === "write" ? writtenContent(e.input).slice(0, MAX_SCAN) : kind === "command" ? undefined : JSON.stringify(e.input).slice(0, MAX_SCAN);
-    findings.push(...customRuleFindings(c.policy.customRules, { kind, command: kind === "command" ? String(e.input.command) : undefined, filePath, text }, ctx));
+    findings.push(...customRuleFindings(c.policy.customRules, { kind, command: kind === "command" ? String(e.input.command) : undefined, filePath: paths[0], text }, ctx));
   }
 
-  // Anything the tool sends out: live secrets and data-dump sites, in any field.
-  if (kind !== "write") {
+  // Anything the tool sends out: live secrets and data-dump sites, in any field. Looking at local files sends nothing out.
+  if (kind !== "write" && kind !== "delete" && !isLocalOnlyTool(e.tool)) {
     const raw = JSON.stringify(e.input).slice(0, MAX_SCAN);
     const secrets = findSecrets(raw);
     if (secrets.length > 0) findings.push(hit("SEC-002", secrets.map((s) => s.type).join(", "), clip(redactSecrets(raw))));
@@ -162,6 +213,7 @@ function makeCtx(event: ShieldEvent, engine: EngineContext, opts: EvaluateOption
     paths,
     policy,
     pii: { packs: s.pii, allowTestData: s.allow_test_data },
+    diff: opts.diff,
     session: {
       allowedHosts: s.allowed_hosts,
       allowedRemotes: s.allowed_remotes,
@@ -241,6 +293,20 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   }
   if (level === "MILD" && settings.mild_notes === "off") action = "allow";
 
+  // "Allow once, allow similar": an earlier approval turns an ask into a note. It never touches a block,
+  // the Rule of Two or the circuit breaker, and the findings (and so the session legs) stay as they were.
+  // Not for an app whose own prompt remembers "Always allow": a hook cannot see which button was pressed, so the app keeps the memory.
+  const appRemembers = APPS_THAT_REMEMBER.has(event.agent);
+  const rememberYes = settings.approvals === "session" && !appRemembers;
+  let approved = false;
+  if (action === "ask" && event.kind === "action" && !ruleOfTwo && !breaker && settings.approvals !== "off") {
+    const lookup: ApprovedLookup = (rule, target) => (settings.approvals === "session" && !appRemembers && Boolean(session?.yes?.[approvalId(rule, target)])) || Boolean(opts.approved?.(rule, target));
+    if (allCovered(findings, lookup)) {
+      action = "note";
+      approved = true;
+    }
+  }
+
   let reason = "";
   let safeAlternative: string | undefined;
   if (findings.length > 0) {
@@ -255,6 +321,8 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   }
 
   const decision: Decision = { action, level, score, findings, reason, ...(safeAlternative ? { safeAlternative } : {}) };
+  if (approved) decision.approved = true;
+  if (action === "ask") decision.asks = findings.filter(needsApproval).map(itemOf);
   if (c.policy.mode === "monitor" && action !== "allow") {
     decision.monitored = action;
     decision.action = "allow";
@@ -263,7 +331,7 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
   // What this event adds to the session: A and B are remembered once the content is in the context.
   const legs: { A?: string; B?: string; script?: [string, FlaggedScript] } = {};
   if (event.kind === "result") {
-    const inputFindings = analyzeAction({ ...event, kind: "action" }, c).findings;
+    const inputFindings = analyzeAction({ ...event, kind: "action" }, { ...c, diff: undefined }).findings;
     legs.A = strangerSource(event, findings, c.paths, c.session);
     legs.B = sensitiveSource(event, findings, inputFindings, c.session);
     legs.script = stagedScript(event, c);
@@ -271,7 +339,16 @@ export function decide(event: ShieldEvent, engine: EngineContext = defaultContex
     legs.B = sensitiveSource(event, findings, [], c.session);
   }
 
-  const next = session ? nextSession(session, event, decision, legs) : undefined;
+  let next = session ? nextSession(session, event, decision, legs, new Date(), !opts.duplicate) : undefined;
+  if (next && event.kind !== "prompt") {
+    const sigs = eventSigs(event);
+    // An action we asked about ran, so a person said yes: remember it. An ask is remembered until its result arrives.
+    if (event.kind === "result") next = rememberYes ? promote(next, sigs) : next;
+    else {
+      next = { ...next, last: { sig: eventSig(event), at: Date.now() } };
+      if (decision.action === "ask" && decision.asks?.length && rememberYes) next = recordPending(next, sigs, decision.asks);
+    }
+  }
   const A = next ? next.legs.A?.why : legs.A;
   const B = next ? next.legs.B?.why : decision.action === "block" ? undefined : legs.B;
   decision.session = { ...(A ? { A } : {}), ...(B ? { B } : {}), ...(legC ? { C: legC.why } : {}), blocks: next?.blocks ?? 0, ruleOfTwo };

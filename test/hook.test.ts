@@ -23,11 +23,26 @@ describe("P4: the hook fails closed", () => {
     } as EngineContext;
     const res = await runHook({ agent: "claude", raw: pre("ls"), env, engine: broken, telemetry: false });
     expect(res.output.exitCode).toBe(2);
-    expect(res.output.stderr).toContain("internal error, action denied");
+    expect(res.output.stderr).toContain("internal error");
+    expect(res.output.stderr).toContain("so this action is denied");
+    expect(res.output.stderr).toContain("simulated engine failure");
   });
 
-  it("an unknown agent is denied", async () => {
-    expect((await runHook({ agent: "nope", raw: pre("ls"), env })).output.exitCode).toBe(2);
+  it("an unreadable message is denied", async () => {
+    expect((await runHook({ agent: "claude", raw: "not json", env, telemetry: false })).output.exitCode).toBe(2);
+    expect((await runHook({ agent: "claude", raw: "[1,2]", env, telemetry: false })).output.exitCode).toBe(2);
+  });
+
+  it("a hook name we do not know still works when the message is recognisable, and is denied when it is not", async () => {
+    expect((await runHook({ agent: "nope", raw: pre("ls"), env, telemetry: false })).output.exitCode).toBe(0);
+    expect((await runHook({ agent: "nope", raw: JSON.stringify({ hello: "world" }), env, telemetry: false })).output.exitCode).toBe(2);
+  });
+
+  it("an event it does not judge is a silent yes, never a deny", async () => {
+    for (const event of ["SessionStart", "Stop", "PreCompact", "Notification"]) {
+      const res = await runHook({ agent: "claude", raw: JSON.stringify({ session_id: "x", cwd: POSIX_CWD, hook_event_name: event }), env, telemetry: false });
+      expect(res.output, event).toEqual({ exitCode: 0 });
+    }
   });
 });
 
@@ -67,10 +82,21 @@ describe("P4: agentshield init", () => {
     expect(second.settings).toEqual(first.settings);
   });
 
-  it("uses exec form with onFailure block, so a crash or timeout denies", () => {
-    expect(ourHandler(cli)).toMatchObject({ command: "node", args: [cli, "hook", "claude"], onFailure: "block" });
-    expect(isOurs(ourHandler(cli))).toBe(true);
+  it("writes one shell string, not exec form, so every app that reads the file can run it", () => {
+    const handler = ourHandler(cli);
+    expect(handler).toMatchObject({ command: `node "${cli}" hook claude`, onFailure: "block" });
+    expect(handler.args).toBeUndefined();
+    expect(isOurs(handler)).toBe(true);
+    // The old exec form is still recognised, so init can rewrite it.
+    expect(isOurs({ type: "command", command: "node", args: [cli, "hook", "claude"] })).toBe(true);
     expect(isOurs({ type: "command", command: "lint.sh" })).toBe(false);
+  });
+
+  it("rewrites the old exec form to the shell string", () => {
+    const legacy = { hooks: { PreToolUse: [{ matcher: "*", hooks: [{ type: "command", command: "node", args: [cli, "hook", "claude"], timeout: 30, onFailure: "block" }] }] } };
+    const fixed = installClaude(legacy, cli);
+    expect(fixed.changes).toContain("updated PreToolUse hook");
+    expect(fixed.settings.hooks!.PreToolUse![0]!.hooks![0]).toEqual(ourHandler(cli));
   });
 
   it("copies itself to a stable runtime path once, and the hooks run that copy", () => {
@@ -91,7 +117,7 @@ describe("P4: agentshield init", () => {
       const out = initCommand([], { cwd: project, cli: source, runtime: target });
       expect(out.exitCode).toBe(0);
       const settings = JSON.parse(readFileSync(join(project, ".claude", "settings.json"), "utf8"));
-      expect(settings.hooks.PreToolUse[0].hooks[0].args[0]).toBe(cliPath(target));
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe(`node "${cliPath(target)}" hook claude`);
       rmSync(dirname(source), { recursive: true });
       expect(existsSync(target), "hooks survive the source being deleted (npx cache cleanup)").toBe(true);
     } finally {
@@ -105,7 +131,7 @@ describe("P4: agentshield init", () => {
       const out = initCommand(["--in-place"], { cwd: dir, cli: "/repo/dist/cli.js", runtime: join(dir, "never") });
       expect(out.exitCode).toBe(0);
       const settings = JSON.parse(readFileSync(join(dir, ".claude", "settings.json"), "utf8"));
-      expect(settings.hooks.PreToolUse[0].hooks[0].args[0]).toBe("/repo/dist/cli.js");
+      expect(settings.hooks.PreToolUse[0].hooks[0].command).toBe('node "/repo/dist/cli.js" hook claude');
       expect(existsSync(join(dir, "never"))).toBe(false);
     } finally {
       rmSync(dir, { recursive: true, force: true });
