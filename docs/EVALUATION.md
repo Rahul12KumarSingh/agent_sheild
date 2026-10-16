@@ -1,32 +1,32 @@
 # AgentShield evaluation
 
-Measured on 2026-10-16 at commit `7a145f2` (Node 22.13.1, win32 10.0.26200 x64). Regenerate with `npm run build && npm run eval`.
+Measured on 2026-10-16 at commit `729b66b` (Node 22.13.1, win32 10.0.26200 x64). Regenerate with `npm run build && npm run eval`.
 
 These numbers are for **our own test set**, written by the team. They are not a claim about unseen attacks. The Rule of Two exists because detection will miss things.
 
 | Measure | Result |
 |---|---|
-| Attack corpus: cases that reach their expected level | **60 / 60** (100.0%) |
-| Mutated attacks (generated disguises of the shell attacks) | **239 / 239** (100.0%) |
-| Benign corpus: blocks | **0 / 60** (must be 0) |
-| Benign corpus: asks | **0 / 60** (must be 0) |
+| Attack corpus: cases that reach their expected level | **85 / 85** (100.0%) |
+| Mutated attacks (generated disguises of the shell attacks) | **367 / 367** (100.0%) |
+| Benign corpus: blocks | **0 / 100** (must be 0) |
+| Benign corpus: asks | **0 / 100** (must be 0) |
 | Scenarios S1 to S10 matching their expected result | **10 / 10** (asserted in `test/server.test.ts`) |
-| Engine latency, in process | p50 0.04 ms, p95 0.11 ms over 3600 evaluations |
-| Hook end to end, spawned like an agent app | p50 163 ms, p95 180 ms (of which Node start-up alone: 115 ms on this machine) |
+| Engine latency, in process | p50 0.05 ms, p95 0.11 ms over 5550 evaluations |
+| Hook end to end, spawned like an agent app | p50 163 ms, p95 192 ms (of which Node start-up alone: 118 ms on this machine) |
 
 ## Attack corpus by category (top finding)
 
 | Category | Reached expected level |
 |---|---|
-| DESTROY | 19 / 19 |
+| DESTROY | 24 / 24 |
 | EXEC | 7 / 7 |
-| EXFIL | 13 / 13 |
+| EXFIL | 14 / 14 |
 | INJECT | 4 / 4 |
 | PII | 1 / 1 |
-| PRIV | 1 / 1 |
+| PRIV | 2 / 2 |
 | SECRET | 8 / 8 |
 | SUPPLY | 1 / 1 |
-| TAMPER | 6 / 6 |
+| TAMPER | 24 / 24 |
 
 ## Mutations
 
@@ -34,13 +34,13 @@ Each Bash attack in the corpus is rewritten with every Bash disguise below, and 
 
 | Disguise | Still caught |
 |---|---|
-| empty quotes in the command word | 32 / 32 |
-| backslash in the command word | 32 / 32 |
-| $IFS instead of spaces | 26 / 26 |
-| wrapped in bash -c | 30 / 30 |
-| sudo prefix | 35 / 35 |
-| env assignment prefix | 36 / 36 |
-| base64 piped into sh | 36 / 36 |
+| empty quotes in the command word | 51 / 51 |
+| backslash in the command word | 51 / 51 |
+| $IFS instead of spaces | 42 / 42 |
+| wrapped in bash -c | 47 / 47 |
+| sudo prefix | 54 / 54 |
+| env assignment prefix | 55 / 55 |
+| base64 piped into sh | 55 / 55 |
 | -EncodedCommand | 8 / 8 |
 | backtick in the cmdlet name | 2 / 2 |
 | string concatenation and the call operator | 2 / 2 |
