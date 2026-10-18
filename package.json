@@ -1,6 +1,6 @@
 {
   "name": "agentshield-hooks",
-  "version": "0.11.1",
+  "version": "0.12.0",
   "description": "A policy checkpoint for AI coding agents: checks every prompt and action, blocks the dangerous ones, suggests safe alternatives.",
   "type": "module",
   "license": "MIT",

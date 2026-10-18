@@ -12,3 +12,5 @@ coverage/
 captures/
 # built by `npm run build` (a copy of dist/cli.js)
 plugin/runtime/
+# local docs, not tracked
+docs/

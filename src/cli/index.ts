@@ -12,7 +12,7 @@ import { runMcp } from "./mcp.js";
 import { demoCommand } from "./demo.js";
 import { setupCommand } from "./setup.js";
 
-const VERSION = "0.11.1";
+const VERSION = "0.12.0";
 const CLI = fileURLToPath(import.meta.url);
 
 const USAGE = `agentshield ${VERSION}: a policy checkpoint for AI coding agents
